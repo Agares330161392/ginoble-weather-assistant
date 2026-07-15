@@ -1,0 +1,279 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>基诺浦天气助手 · 全国城市预报</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <div class="bg-orbs" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+  </div>
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-fixed">
+        <header class="brand">
+          <span class="brand-icon">G</span>
+          <div>
+            <h1>基诺浦天气助手</h1>
+            <p class="brand-tagline">GINOBLE · 分季选款</p>
+            <p id="cityStats" class="city-stats">加载城市中…</p>
+          </div>
+        </header>
+
+        <div class="search-box">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="search" id="citySearch" placeholder="搜索城市，如：杭州、义乌…" autocomplete="off" />
+          <ul id="searchResults" class="search-results hidden"></ul>
+        </div>
+
+        <section class="favorites-panel">
+          <div class="panel-head">
+            <span class="panel-title">⭐ 常用城市</span>
+            <button type="button" class="btn-icon" id="btnAddFavorite" title="将当前城市加入常用" disabled>＋</button>
+          </div>
+          <div id="favoriteList" class="favorite-chips"></div>
+          <p id="favoriteHint" class="favorites-hint">选中城市后点 ＋，或从搜索列表添加</p>
+        </section>
+
+        <button type="button" class="btn-national hidden" id="btnNationalWeather">全国天气</button>
+        <button type="button" class="btn-xhs" id="btnXhsAnalyze">
+          小红书内容抓取分析
+          <span class="xhs-running-dot hidden" id="xhsRunningDot" title="分析进行中"></span>
+        </button>
+      </div>
+
+      <div class="sidebar-scroll-wrap">
+        <p class="scroll-label">全部城市</p>
+        <nav class="province-nav" id="provinceNav" aria-label="按省份选择城市"></nav>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="map-section" id="mapSection">
+        <header class="map-header">
+          <div>
+            <p class="map-kicker">全国宏观天气观测</p>
+            <h2>中国天气总览图</h2>
+            <p class="map-subtitle">用颜色快速查看全国各省的温度、降水和风雨趋势，鼠标悬停可查看详细数据。</p>
+          </div>
+          <div class="map-header-actions">
+            <div class="map-mode-toggle" role="tablist" aria-label="地图模式切换">
+              <button type="button" class="map-mode-btn active" id="btnTempMode">温度图</button>
+              <button type="button" class="map-mode-btn" id="btnRainMode">降水图</button>
+            </div>
+            <button type="button" class="map-zoom-btn" id="btnMapZoomOut">−</button>
+            <button type="button" class="map-zoom-btn" id="btnMapZoomIn">＋</button>
+            <div class="map-legend" id="mapLegend"></div>
+          </div>
+        </header>
+        <div class="map-toolbar">
+          <div class="map-stat" id="mapStatTemp">全国平均气温 --°C</div>
+          <div class="map-stat" id="mapStatRain">全国平均降水 --mm</div>
+          <div class="map-stat" id="mapStatTrend">整体趋势 --</div>
+        </div>
+        <div class="china-map-shell">
+          <div class="china-map-frame">
+            <div class="china-map-inner" id="chinaMap"></div>
+          </div>
+          <div class="map-tooltip hidden" id="mapTooltip"></div>
+        </div>
+      </section>
+
+      <section class="hero hidden" id="hero">
+        <div class="hero-placeholder">
+          <h2>选择或搜索一个城市</h2>
+          <p>查看未来 7 天详细预报、近 16 天月度趋势，并获取基诺浦专属 AI分析（分季选款）</p>
+          <p class="hero-note">说明：免费气象数据源最长约 16 天预报；AI 会基于天气生成营销策略，不涉及商品、库存或尺码建议。</p>
+        </div>
+      </section>
+
+      <section class="city-panel hidden" id="cityPanel">
+        <header class="city-header">
+          <div class="city-title-row">
+            <div>
+              <p class="province-label" id="provinceLabel"></p>
+              <h2 id="cityTitle">—</h2>
+            </div>
+            <button type="button" class="btn-fav-star hidden" id="btnFavStar" title="加入常用城市">☆ 常用</button>
+          </div>
+          <div class="current-weather" id="currentWeather"></div>
+        </header>
+
+        <div class="tabs">
+          <button type="button" class="tab active" data-days="7">未来 7 天</button>
+          <button type="button" class="tab" data-days="16">近 16 天趋势 <span class="tab-hint">（月度参考）</span></button>
+        </div>
+
+        <div class="forecast-grid" id="forecastGrid"></div>
+
+        <section class="ai-section">
+          <header class="ai-header">
+            <div>
+              <h3>🤖 基诺浦 AI 分析</h3>
+              <p class="ai-sub">通义千问 · 天气营销策略生成</p>
+            </div>
+            <button type="button" class="btn-primary" id="btnAnalyze">生成基诺浦营销方案</button>
+          </header>
+          <div class="ai-body" id="aiBody">
+            <p class="ai-placeholder">点击上方按钮，将先生成基础内容；随后可继续点击“深度分析”查看后续策略。</p>
+          </div>
+          <div class="ai-deep-actions hidden" id="aiDeepActions">
+            <button type="button" class="btn-secondary" id="btnDeepAnalyze">深度分析</button>
+          </div>
+          <div class="ai-deep-body hidden" id="aiDeepBody"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast hidden" id="toast" role="status"></div>
+  <div class="loading-overlay hidden" id="loading">
+    <div class="spinner"></div>
+    <p id="loadingText">加载中…</p>
+  </div>
+
+  <div class="modal-overlay hidden" id="xhsModal" role="dialog" aria-modal="true" aria-labelledby="xhsModalTitle">
+    <div class="modal-panel xhs-modal">
+      <header class="modal-header">
+        <div>
+          <p class="modal-kicker">独立功能 · 内部研究参考</p>
+          <h2 id="xhsModalTitle">小红书内容抓取分析</h2>
+        </div>
+        <button type="button" class="btn-icon modal-close" id="btnXhsClose" aria-label="关闭">×</button>
+      </header>
+
+      <div class="xhs-layout">
+        <section class="xhs-form-pane">
+          <label class="field">
+            <span>分析预设</span>
+            <div class="preset-row">
+              <select id="xhsPresetSelect"></select>
+              <button type="button" class="btn-secondary btn-sm" id="btnXhsSavePreset">另存为</button>
+              <button type="button" class="btn-secondary btn-sm" id="btnXhsUpdatePreset">保存修改</button>
+              <button type="button" class="btn-secondary btn-sm danger" id="btnXhsDeletePreset">删除</button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>分析类型</span>
+            <input type="text" id="xhsAnalysisType" list="xhsAnalysisTypeList" placeholder="可下拉选择，也可自行填写" autocomplete="off" />
+            <datalist id="xhsAnalysisTypeList">
+              <option value="品类场景洞察"></option>
+              <option value="竞品舆情深挖"></option>
+              <option value="竞品种草对比"></option>
+            </datalist>
+          </label>
+
+          <label class="field">
+            <span>关键词</span>
+            <input type="text" id="xhsKeyword" placeholder="一个搜索词，如：学步鞋 / 稳稳鞋 / 泰兰尼斯" />
+            <p class="xhs-inline-hint">用于小红书搜索抓取；当前一次分析使用 1 个关键词。</p>
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>抓取量</span>
+              <input type="number" id="xhsFetchCount" min="1" max="50" value="20" />
+            </label>
+            <label class="field">
+              <span>排序</span>
+              <select id="xhsSortType">
+                <option value="general">综合</option>
+                <option value="popularity_descending">最热</option>
+                <option value="time_descending">最新</option>
+                <option value="comment_descending">评论最多</option>
+                <option value="collect_descending">收藏最多</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>时间范围</span>
+              <select id="xhsNoteTime">
+                <option value="不限">不限</option>
+                <option value="一天内">一天内</option>
+                <option value="一周内" selected>一周内</option>
+                <option value="一个月内">一个月内</option>
+                <option value="半年内">半年内</option>
+                <option value="一年内">一年内</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="field-checks">
+            <label class="check">
+              <input type="checkbox" id="xhsFetchComments" />
+              <span>拉取热门评论（舆情更准，更耗时）</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="xhsUseWeather" />
+              <span>结合天气</span>
+            </label>
+          </div>
+
+          <label class="field hidden" id="xhsWeatherCityWrap">
+            <span>天气范围</span>
+            <select id="xhsWeatherCity"></select>
+            <p class="xhs-inline-hint">勾选结合天气后可选；默认「全国」</p>
+          </label>
+
+          <label class="field">
+            <span>补充分析要求</span>
+            <textarea id="xhsExtraPrompt" rows="3" placeholder="例如：重点看价格争议、场景拆解、可执行选题…"></textarea>
+          </label>
+
+          <div class="xhs-actions">
+            <button type="button" class="btn-primary" id="btnXhsRun">开始抓取分析</button>
+          </div>
+          <div class="xhs-progress hidden" id="xhsProgressWrap">
+            <div class="xhs-progress-top">
+              <span id="xhsProgressText">准备中…</span>
+              <span id="xhsProgressPct">0%</span>
+            </div>
+            <div class="xhs-progress-track" aria-hidden="true">
+              <div class="xhs-progress-bar" id="xhsProgressBar"></div>
+            </div>
+            <p class="xhs-inline-hint">关闭弹窗不会中断分析；完成后会提示，并可在历史记录中查看。</p>
+          </div>
+          <p class="xhs-hint" id="xhsStatusHint">选择预设后可直接分析；关闭界面分析会继续跑。</p>
+        </section>
+
+        <section class="xhs-result-pane">
+          <header class="xhs-result-header">
+            <div>
+              <div class="xhs-pane-tabs" role="tablist">
+                <button type="button" class="xhs-pane-tab active" id="btnXhsTabReport" data-pane="report">当前报告</button>
+                <button type="button" class="xhs-pane-tab" id="btnXhsTabHistory" data-pane="history">历史记录</button>
+              </div>
+              <p id="xhsResultMeta" class="xhs-result-meta">尚未生成</p>
+            </div>
+            <div class="xhs-result-actions">
+              <button type="button" class="btn-secondary btn-sm" id="btnXhsPreview" disabled>预览</button>
+              <button type="button" class="btn-secondary btn-sm" id="btnXhsDownloadHtml" disabled>下载网页</button>
+              <button type="button" class="btn-secondary btn-sm" id="btnXhsDownload" disabled>下载 MD</button>
+            </div>
+          </header>
+          <div class="xhs-result-body" id="xhsResultBody">
+            <p class="ai-placeholder">报告将显示在这里，支持预览、下载与历史回看。</p>
+          </div>
+          <div class="xhs-history-body hidden" id="xhsHistoryBody">
+            <div class="xhs-history-toolbar">
+              <p class="xhs-inline-hint">保存在项目文件夹 <code>xhs-reports/</code>，点击可回看。</p>
+              <button type="button" class="btn-secondary btn-sm" id="btnXhsRefreshHistory">刷新</button>
+            </div>
+            <div id="xhsHistoryList" class="xhs-history-list"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

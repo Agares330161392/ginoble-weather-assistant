@@ -1,0 +1,62 @@
+{
+  "presets": [
+    {
+      "id": "sys_category_scene",
+      "name": "品类场景洞察",
+      "system": true,
+      "analysis_type": "category_scene",
+      "keyword": "学步鞋",
+      "sort_type": "general",
+      "note_time": "一周内",
+      "fetch_count": 20,
+      "fetch_comments": false,
+      "use_weather": false,
+      "weather_city": "全国",
+      "weather_province": "",
+      "extra_prompt": "重点拆解内容场景与种草形式，给出可复用的选题公式。"
+    },
+    {
+      "id": "sys_competitor_sentiment",
+      "name": "竞品舆情深挖",
+      "system": true,
+      "analysis_type": "competitor_sentiment",
+      "keyword": "泰兰尼斯稳稳鞋",
+      "sort_type": "general",
+      "note_time": "一周内",
+      "fetch_count": 20,
+      "fetch_comments": true,
+      "use_weather": false,
+      "weather_city": "全国",
+      "weather_province": "",
+      "extra_prompt": "重点看口碑正负向、价格/广告/质量争议，以及对基诺浦的启示。"
+    },
+    {
+      "id": "sys_competitor_seeding",
+      "name": "竞品种草对比",
+      "system": true,
+      "analysis_type": "competitor_seeding",
+      "keyword": "泰兰尼斯",
+      "sort_type": "general",
+      "note_time": "一周内",
+      "fetch_count": 20,
+      "fetch_comments": false,
+      "use_weather": false,
+      "weather_city": "全国",
+      "weather_province": "",
+      "extra_prompt": "对比种草策略与内容差异，找出基诺浦可跟进的机会点。"
+    }
+  ],
+  "last_selection": {
+    "preset_id": "sys_competitor_seeding",
+    "analysis_type": "competitor_seeding",
+    "keyword": "江博士",
+    "sort_type": "general",
+    "note_time": "一周内",
+    "fetch_count": 20,
+    "fetch_comments": false,
+    "use_weather": false,
+    "weather_city": "全国",
+    "weather_province": "",
+    "extra_prompt": "对比种草策略与内容差异，找出基诺浦可跟进的机会点。"
+  }
+}
