@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""基诺浦天气助手 - 本地服务（天气代理 + 通义千问分析 + 小红书分析）"""
+"""基诺浦场景小助手 - 本地服务（天气代理 + 通义千问分析 + 小红书分析）"""
 import os
 import subprocess
 import sys
@@ -246,7 +246,7 @@ STRICT_FACTS = """
 
 def build_marketing_prompt(city_name: str, province: str, weather_text: str, mode: str = "base") -> list[dict]:
     system_prompt = (
-        "你是基诺浦童鞋天气营销助手。只做营销判断，不做天气科普；只用真实品牌信息，不编造型号、SKU、系列名或数据。"
+        "你是基诺浦场景小助手。只做营销判断，不做天气科普；只用真实品牌信息，不编造型号、SKU、系列名或数据。"
         "输出要稳、准、可执行。"
     )
     if mode == "deep":
@@ -633,7 +633,7 @@ def xhs_reports_delete(report_id: str):
 
 if __name__ == "__main__":
     SERVER_PORT = int(os.environ.get("PORT", SERVER_PORT))
-    print("基诺浦天气营销助手")
+    print("基诺浦场景小助手")
     print(f"浏览器打开: http://127.0.0.1:{SERVER_PORT}")
     print("服务启动中，请稍候...")
     _free_server_port(SERVER_PORT)
