@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import re
 import time
 import uuid
@@ -587,7 +588,7 @@ def _ensure_reports_dir() -> Path:
 
 
 def save_report(report_md: str, meta: dict) -> dict:
-    """保存报告到 xhs-reports/，返回含 id 的 meta。"""
+    """保存报告到 xhs-reports/（本地文件系统），线上同步到 PostgreSQL。"""
     _ensure_reports_dir()
     stamp = time.strftime("%Y%m%d_%H%M%S")
     report_id = f"{stamp}_{uuid.uuid4().hex[:8]}"
@@ -603,14 +604,29 @@ def save_report(report_md: str, meta: dict) -> dict:
         "filename_md": f"{report_id}.md",
         "filename_meta": f"{report_id}.json",
     }
-    md_path = REPORTS_DIR / f"{report_id}.md"
-    meta_path = REPORTS_DIR / f"{report_id}.json"
-    md_path.write_text(report_md or "", encoding="utf-8")
-    meta_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    # 本地文件系统保存
+    try:
+        md_path = REPORTS_DIR / f"{report_id}.md"
+        meta_path = REPORTS_DIR / f"{report_id}.json"
+        md_path.write_text(report_md or "", encoding="utf-8")
+        meta_path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[fs] save report failed: {e}")
+    # PostgreSQL 保存（线上持久化）
+    if _get_db_url():
+        _pg_save_report(report_md, record)
     return record
 
 
 def list_reports(limit: int = 100) -> list[dict]:
+    # 线上优先从 PostgreSQL 读取
+    if _get_db_url():
+        pg_items = _pg_list_reports(limit)
+        if pg_items:
+            return pg_items
+        # 数据库为空时返回空列表（不回退到文件系统，因为线上文件系统是临时的）
+        return []
+    # 本地从文件系统读取
     _ensure_reports_dir()
     items: list[dict] = []
     for meta_path in REPORTS_DIR.glob("*.json"):
@@ -639,6 +655,13 @@ def list_reports(limit: int = 100) -> list[dict]:
 
 
 def get_report(report_id: str) -> dict:
+    # 线上优先从 PostgreSQL 读取
+    if _get_db_url():
+        result = _pg_get_report(report_id)
+        if result:
+            return result
+        raise KeyError("报告不存在")
+    # 本地从文件系统读取
     _ensure_reports_dir()
     safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", report_id or "")
     if not safe_id:
@@ -653,15 +676,202 @@ def get_report(report_id: str) -> dict:
 
 
 def delete_report(report_id: str) -> None:
-    _ensure_reports_dir()
     safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", report_id or "")
     if not safe_id:
         raise KeyError("报告不存在")
+    deleted = False
+    # 线上从 PostgreSQL 删除
+    if _get_db_url():
+        deleted = _pg_delete_report(report_id)
+    # 本地从文件系统删除
+    _ensure_reports_dir()
     meta_path = REPORTS_DIR / f"{safe_id}.json"
     md_path = REPORTS_DIR / f"{safe_id}.md"
-    if not meta_path.is_file() and not md_path.is_file():
-        raise KeyError("报告不存在")
+    fs_existed = meta_path.is_file() or md_path.is_file()
     if meta_path.is_file():
         meta_path.unlink()
     if md_path.is_file():
         md_path.unlink()
+    if not deleted and not fs_existed:
+        raise KeyError("报告不存在")
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL 持久化（线上 Render 使用，本地无 DATABASE_URL 时自动跳过）
+# ---------------------------------------------------------------------------
+
+_pg_pool = None
+
+
+def _get_db_url() -> str:
+    return os.environ.get("DATABASE_URL", "").strip()
+
+
+def _get_pg_conn():
+    global _pg_pool
+    if not _get_db_url():
+        return None
+    if _pg_pool is None:
+        import psycopg2
+        from psycopg2 import pool
+        _pg_pool = pool.SimpleConnectionPool(1, 5, _get_db_url())
+    return _pg_pool.getconn()
+
+
+def _return_pg_conn(conn):
+    global _pg_pool
+    if _pg_pool and conn:
+        _pg_pool.putconn(conn)
+
+
+def _pg_init():
+    """创建报告表（幂等）"""
+    conn = _get_pg_conn()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS xhs_reports (
+                    id           TEXT PRIMARY KEY,
+                    title        TEXT,
+                    keyword      TEXT DEFAULT '',
+                    analysis_type TEXT DEFAULT '',
+                    analysis_type_name TEXT DEFAULT '',
+                    sample_count INTEGER DEFAULT 0,
+                    note_time    TEXT DEFAULT '',
+                    sort_type    TEXT DEFAULT '',
+                    fetch_comments BOOLEAN DEFAULT FALSE,
+                    use_weather  BOOLEAN DEFAULT FALSE,
+                    weather_city TEXT DEFAULT '',
+                    created_at   TEXT,
+                    report_md    TEXT,
+                    meta_json    TEXT
+                )
+            """)
+        conn.commit()
+    except Exception as e:
+        print(f"[pg] init table failed: {e}")
+    finally:
+        _return_pg_conn(conn)
+
+
+def _pg_save_report(report_md: str, record: dict) -> dict:
+    conn = _get_pg_conn()
+    if not conn:
+        return record
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO xhs_reports
+                    (id, title, keyword, analysis_type, analysis_type_name,
+                     sample_count, note_time, sort_type, fetch_comments,
+                     use_weather, weather_city, created_at, report_md, meta_json)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    report_md = EXCLUDED.report_md,
+                    meta_json = EXCLUDED.meta_json
+            """, (
+                record.get("id"),
+                record.get("title"),
+                record.get("keyword", ""),
+                record.get("analysis_type", ""),
+                record.get("analysis_type_name", ""),
+                record.get("sample_count", 0),
+                record.get("note_time", ""),
+                record.get("sort_type", ""),
+                record.get("fetch_comments", False),
+                record.get("use_weather", False),
+                record.get("weather_city", ""),
+                record.get("created_at", ""),
+                report_md,
+                json.dumps(record, ensure_ascii=False),
+            ))
+        conn.commit()
+        print(f"[pg] saved report {record.get('id')}")
+    except Exception as e:
+        print(f"[pg] save report failed: {e}")
+    finally:
+        _return_pg_conn(conn)
+    return record
+
+
+def _pg_list_reports(limit: int = 100) -> list[dict]:
+    conn = _get_pg_conn()
+    if not conn:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id, title, keyword, analysis_type, analysis_type_name,
+                       sample_count, note_time, use_weather, weather_city, created_at
+                FROM xhs_reports
+                ORDER BY created_at DESC NULLS LAST
+                LIMIT %s
+            """, (max(1, min(limit, 500)),))
+            rows = cur.fetchall()
+        items = []
+        for r in rows:
+            items.append({
+                "id": r[0],
+                "title": r[1],
+                "keyword": r[2] or "",
+                "analysis_type": r[3] or "",
+                "analysis_type_name": r[4] or "",
+                "sample_count": r[5] or 0,
+                "note_time": r[6] or "",
+                "use_weather": bool(r[7]),
+                "weather_city": r[8] or "",
+                "created_at": r[9] or "",
+            })
+        return items
+    except Exception as e:
+        print(f"[pg] list reports failed: {e}")
+        return []
+    finally:
+        _return_pg_conn(conn)
+
+
+def _pg_get_report(report_id: str) -> dict | None:
+    conn = _get_pg_conn()
+    if not conn:
+        return None
+    safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", report_id or "")
+    if not safe_id:
+        return None
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT meta_json, report_md FROM xhs_reports WHERE id = %s
+            """, (safe_id,))
+            row = cur.fetchone()
+        if not row:
+            return None
+        meta = json.loads(row[0]) if row[0] else {}
+        return {"meta": meta, "report_md": row[1] or ""}
+    except Exception as e:
+        print(f"[pg] get report failed: {e}")
+        return None
+    finally:
+        _return_pg_conn(conn)
+
+
+def _pg_delete_report(report_id: str) -> bool:
+    conn = _get_pg_conn()
+    if not conn:
+        return False
+    safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", report_id or "")
+    if not safe_id:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM xhs_reports WHERE id = %s", (safe_id,))
+            deleted = cur.rowcount > 0
+        conn.commit()
+        return deleted
+    except Exception as e:
+        print(f"[pg] delete report failed: {e}")
+        return False
+    finally:
+        _return_pg_conn(conn)

@@ -649,9 +649,10 @@ if __name__ == "__main__":
         _open_browser_once(f"http://127.0.0.1:{SERVER_PORT}")
     app.run(host=host, port=SERVER_PORT, debug=False, use_reloader=False)
 else:
-    # gunicorn / WSGI 入口：初始化必要目录
+    # gunicorn / WSGI 入口：初始化必要目录 + 数据库表
     try:
         xhs_service._ensure_presets_file()
         xhs_service._ensure_reports_dir()
+        xhs_service._pg_init()
     except Exception as e:
         print(f"[startup] xhs init warning: {e}")

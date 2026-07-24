@@ -1,3 +1,7 @@
+databases:
+  - name: ginoble-reports-db
+    plan: free
+
 services:
   - type: web
     name: ginoble-weather-assistant
@@ -12,3 +16,6 @@ services:
         sync: false
       - key: PYTHON_VERSION
         value: "3.13.12"
+      - key: DATABASE_URL
+        fromDatabase: ginoble-reports-db
+        property: connectionString
