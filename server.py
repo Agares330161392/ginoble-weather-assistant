@@ -642,6 +642,10 @@ if __name__ == "__main__":
     load_ginoble_knowledge()
     xhs_service._ensure_presets_file()
     xhs_service._ensure_reports_dir()
+    try:
+        xhs_service._pg_init()
+    except Exception as e:
+        print(f"[startup] pg init warning: {e}")
     host = os.environ.get("HOST", "127.0.0.1")
     if host != "127.0.0.1":
         _open_browser_once(f"http://0.0.0.0:{SERVER_PORT}")

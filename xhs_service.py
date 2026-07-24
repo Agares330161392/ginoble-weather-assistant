@@ -614,7 +614,10 @@ def save_report(report_md: str, meta: dict) -> dict:
         print(f"[fs] save report failed: {e}")
     # PostgreSQL 保存（线上持久化）
     if _get_db_url():
-        _pg_save_report(report_md, record)
+        pg_ok = _pg_save_report(report_md, record)
+        if not pg_ok:
+            record["pg_save_failed"] = True
+            print("[xhs] WARNING: pg save failed, report only in local fs")
     return record
 
 
@@ -622,10 +625,10 @@ def list_reports(limit: int = 100) -> list[dict]:
     # 线上优先从 PostgreSQL 读取
     if _get_db_url():
         pg_items = _pg_list_reports(limit)
-        if pg_items:
+        if pg_items is not None:
             return pg_items
-        # 数据库为空时返回空列表（不回退到文件系统，因为线上文件系统是临时的）
-        return []
+        # 连接失败时回退到文件系统
+        print("[xhs] pg list failed, fallback to filesystem")
     # 本地从文件系统读取
     _ensure_reports_dir()
     items: list[dict] = []
@@ -660,7 +663,8 @@ def get_report(report_id: str) -> dict:
         result = _pg_get_report(report_id)
         if result:
             return result
-        raise KeyError("报告不存在")
+        # 数据库中未找到或连接失败，回退到文件系统
+        print("[xhs] pg get failed or not found, fallback to filesystem")
     # 本地从文件系统读取
     _ensure_reports_dir()
     safe_id = re.sub(r"[^a-zA-Z0-9_\-]", "", report_id or "")
@@ -756,10 +760,11 @@ def _pg_init():
         _return_pg_conn(conn)
 
 
-def _pg_save_report(report_md: str, record: dict) -> dict:
+def _pg_save_report(report_md: str, record: dict) -> bool:
+    """保存报告到 PostgreSQL，返回是否成功。"""
     conn = _get_pg_conn()
     if not conn:
-        return record
+        return False
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -790,17 +795,19 @@ def _pg_save_report(report_md: str, record: dict) -> dict:
             ))
         conn.commit()
         print(f"[pg] saved report {record.get('id')}")
+        return True
     except Exception as e:
         print(f"[pg] save report failed: {e}")
+        return False
     finally:
         _return_pg_conn(conn)
-    return record
 
 
-def _pg_list_reports(limit: int = 100) -> list[dict]:
+def _pg_list_reports(limit: int = 100) -> list[dict] | None:
+    """从 PostgreSQL 读取报告列表。连接失败返回 None，表为空返回 []。"""
     conn = _get_pg_conn()
     if not conn:
-        return []
+        return None
     try:
         with conn.cursor() as cur:
             cur.execute("""
@@ -828,7 +835,7 @@ def _pg_list_reports(limit: int = 100) -> list[dict]:
         return items
     except Exception as e:
         print(f"[pg] list reports failed: {e}")
-        return []
+        return None
     finally:
         _return_pg_conn(conn)
 
