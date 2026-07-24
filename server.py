@@ -14,6 +14,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
 import xhs_service
+import dy_service
 
 BASE_DIR = Path(__file__).resolve().parent
 KEY_ENV_CANDIDATES = [BASE_DIR / "key.env", BASE_DIR.parent / "key.env"]
@@ -29,6 +30,10 @@ DASHSCOPE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completi
 # 小红书分析任务（内存）；关闭弹窗不中断
 _xhs_jobs: dict[str, dict] = {}
 _xhs_jobs_lock = threading.Lock()
+
+# 抖音分析任务（内存）；关闭弹窗不中断
+_dy_jobs: dict[str, dict] = {}
+_dy_jobs_lock = threading.Lock()
 
 
 def _open_browser_once(url: str):
@@ -185,6 +190,21 @@ def load_xhs_api_key() -> str:
     return ""
 
 
+def load_tikhub_api_key() -> str:
+    for name in ("TIKHUB_API_KEY", "DY_API_KEY", "DOUYIN_API_KEY"):
+        val = os.environ.get(name, "").strip()
+        if val:
+            print(f"[dy] apikey loaded from env var {name}")
+            return val
+    env = _load_env_map()
+    for name in ("TIKHUB_API_KEY", "DY_API_KEY", "DOUYIN_API_KEY"):
+        if env.get(name):
+            print(f"[dy] apikey loaded from {Path(env.get('_path', 'key.env')).name}")
+            return env[name]
+    print("[dy] missing: put TIKHUB_API_KEY in weather-app/key.env or set TIKHUB_API_KEY env var")
+    return ""
+
+
 def load_ginoble_knowledge() -> str:
     path = _first_existing(BRAND_FILE_CANDIDATES)
     if not path:
@@ -336,6 +356,7 @@ def health():
         "ok": True,
         "has_api_key": bool(load_api_key()),
         "has_xhs_api_key": bool(load_xhs_api_key()),
+        "has_tikhub_api_key": bool(load_tikhub_api_key()),
         "brand_loaded": bool(load_ginoble_knowledge()),
         "brand": "基诺浦 GINOBLE",
     })
@@ -631,6 +652,248 @@ def xhs_reports_delete(report_id: str):
         return jsonify({"error": str(e)}), 500
 
 
+# ===========================================================================
+# 抖音内容抓取分析 API
+# ===========================================================================
+
+@app.route("/api/dy/presets", methods=["GET"])
+def dy_presets_list():
+    doc = dy_service.load_presets_doc()
+    return jsonify(doc)
+
+
+@app.route("/api/dy/presets", methods=["POST"])
+def dy_presets_create():
+    body = request.get_json(silent=True) or {}
+    if not (body.get("keyword") or "").strip() and not (body.get("name") or "").strip():
+        return jsonify({"error": "请至少填写预设名称或关键词"}), 400
+    try:
+        preset = dy_service.create_preset(body)
+        return jsonify({"preset": preset})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dy/presets/<preset_id>", methods=["PUT"])
+def dy_presets_update(preset_id: str):
+    body = request.get_json(silent=True) or {}
+    try:
+        preset = dy_service.update_preset(preset_id, body)
+        return jsonify({"preset": preset})
+    except KeyError:
+        return jsonify({"error": "预设不存在"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dy/presets/<preset_id>", methods=["DELETE"])
+def dy_presets_delete(preset_id: str):
+    try:
+        dy_service.delete_preset(preset_id)
+        return jsonify({"ok": True})
+    except KeyError:
+        return jsonify({"error": "预设不存在"}), 404
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dy/last-selection", methods=["PUT"])
+def dy_last_selection():
+    body = request.get_json(silent=True) or {}
+    try:
+        last = dy_service.update_last_selection(body)
+        return jsonify({"last_selection": last})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dy/analyze", methods=["POST"])
+def dy_analyze():
+    """启动抖音后台分析任务，立即返回 job_id；前端轮询进度。"""
+    qwen_key = load_api_key()
+    tikhub_key = load_tikhub_api_key()
+    brand = load_ginoble_knowledge()
+    if not qwen_key:
+        return jsonify({"error": "未配置千问 API Key（请检查 key.env）"}), 500
+    if not tikhub_key:
+        return jsonify({"error": "未配置 TikHub API Key（请在 key.env 写入 TIKHUB_API_KEY）"}), 500
+    if not brand:
+        return jsonify({"error": "未加载品牌文案（请检查 ginoble_brand.txt）"}), 500
+
+    body = request.get_json(silent=True) or {}
+    fields = dy_service.selection_fields(body)
+    if not fields["keyword"]:
+        return jsonify({"error": "请填写分析关键词"}), 400
+
+    try:
+        dy_service.update_last_selection(fields)
+    except Exception:
+        pass
+
+    job_id = uuid.uuid4().hex[:12]
+    with _dy_jobs_lock:
+        _dy_jobs[job_id] = {
+            "status": "running",
+            "percent": 2,
+            "message": "任务已创建，准备搜索…",
+            "result": None,
+            "error": None,
+        }
+
+    def _set_progress(percent: int, message: str):
+        with _dy_jobs_lock:
+            job = _dy_jobs.get(job_id)
+            if not job or job.get("status") != "running":
+                return
+            job["percent"] = max(0, min(99, int(percent)))
+            job["message"] = message
+
+    def _run_job():
+        try:
+            _set_progress(8, f"正在搜索「{fields['keyword']}」…")
+            videos = dy_service.search_videos(
+                tikhub_key,
+                keyword=fields["keyword"],
+                fetch_count=fields["fetch_count"],
+                sort_type=fields["sort_type"],
+                note_time=fields["note_time"],
+            )
+            if not videos:
+                raise RuntimeError("未搜索到相关视频，请更换关键词或时间范围后重试")
+
+            total = len(videos)
+            _set_progress(18, f"已找到 {total} 条，开始拉取详情…")
+
+            def on_progress(done, all_count, title):
+                pct = 18 + int(54 * done / max(all_count, 1))
+                short = (title or "")[:18]
+                tip = f"拉取详情 {done}/{all_count}" + (f"：{short}" if short else "")
+                _set_progress(pct, tip)
+
+            enriched = dy_service.enrich_videos(
+                tikhub_key,
+                videos,
+                fetch_comments=fields["fetch_comments"],
+                on_progress=on_progress,
+            )
+            videos_text = dy_service.videos_to_prompt_text(enriched)
+            _, type_name = dy_service.resolve_analysis_type(fields["analysis_type"])
+            messages = dy_service.build_dy_analysis_messages(
+                analysis_type=fields["analysis_type"],
+                keyword=fields["keyword"],
+                videos_text=videos_text,
+                brand_text=brand + "\n" + STRICT_FACTS,
+                extra_prompt=fields["extra_prompt"],
+                sample_count=len(enriched),
+                note_time=fields["note_time"],
+            )
+            _set_progress(78, "详情完成，通义千问分析中（较慢，请稍候）…")
+            report_md = call_qwen_messages(qwen_key, messages, temperature=0.35, timeout=180)
+            _set_progress(92, "分析完成，正在保存报告…")
+            filename = dy_service.safe_filename(fields["keyword"], fields["analysis_type"]) + ".md"
+            meta = {
+                "keyword": fields["keyword"],
+                "analysis_type": fields["analysis_type"],
+                "analysis_type_name": type_name,
+                "sample_count": len(enriched),
+                "note_time": fields["note_time"],
+                "sort_type": fields["sort_type"],
+                "fetch_comments": fields["fetch_comments"],
+                "filename": filename,
+            }
+            try:
+                saved = dy_service.save_report(report_md, meta)
+                meta = {**meta, **saved}
+            except Exception as e:
+                print(f"[dy] save report failed: {e}")
+
+            payload = {
+                "report_md": report_md,
+                "meta": meta,
+                "notes": [
+                    {
+                        "aweme_id": n.get("aweme_id"),
+                        "title": n.get("title"),
+                        "liked": n.get("liked", 0),
+                        "commented": n.get("commented", 0),
+                        "author": n.get("author"),
+                    }
+                    for n in enriched
+                ],
+            }
+            with _dy_jobs_lock:
+                _dy_jobs[job_id] = {
+                    "status": "done",
+                    "percent": 100,
+                    "message": "分析完成",
+                    "result": payload,
+                    "error": None,
+                }
+        except Exception as e:
+            with _dy_jobs_lock:
+                _dy_jobs[job_id] = {
+                    "status": "error",
+                    "percent": 100,
+                    "message": "分析失败",
+                    "result": None,
+                    "error": str(e),
+                }
+
+    threading.Thread(target=_run_job, daemon=True).start()
+    return jsonify({"job_id": job_id, "status": "running"})
+
+
+@app.route("/api/dy/analyze/status/<job_id>", methods=["GET"])
+def dy_analyze_status(job_id: str):
+    with _dy_jobs_lock:
+        job = _dy_jobs.get(job_id)
+        if not job:
+            return jsonify({"error": "任务不存在或已过期"}), 404
+        data = {
+            "job_id": job_id,
+            "status": job.get("status"),
+            "percent": job.get("percent", 0),
+            "message": job.get("message") or "",
+            "error": job.get("error"),
+        }
+        if job.get("status") == "done":
+            data["result"] = job.get("result")
+    return jsonify(data)
+
+
+@app.route("/api/dy/reports", methods=["GET"])
+def dy_reports_list():
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    return jsonify({"reports": dy_service.list_reports(limit=limit)})
+
+
+@app.route("/api/dy/reports/<report_id>", methods=["GET"])
+def dy_reports_get(report_id: str):
+    try:
+        data = dy_service.get_report(report_id)
+        return jsonify(data)
+    except KeyError:
+        return jsonify({"error": "报告不存在"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/dy/reports/<report_id>", methods=["DELETE"])
+def dy_reports_delete(report_id: str):
+    try:
+        dy_service.delete_report(report_id)
+        return jsonify({"ok": True})
+    except KeyError:
+        return jsonify({"error": "报告不存在"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     SERVER_PORT = int(os.environ.get("PORT", SERVER_PORT))
     print("基诺浦场景小助手")
@@ -645,7 +908,14 @@ if __name__ == "__main__":
     try:
         xhs_service._pg_init()
     except Exception as e:
-        print(f"[startup] pg init warning: {e}")
+        print(f"[startup] xhs pg init warning: {e}")
+    dy_service._ensure_presets_file()
+    dy_service._ensure_reports_dir()
+    try:
+        dy_service._pg_init()
+    except Exception as e:
+        print(f"[startup] dy pg init warning: {e}")
+    load_tikhub_api_key()
     host = os.environ.get("HOST", "127.0.0.1")
     if host != "127.0.0.1":
         _open_browser_once(f"http://0.0.0.0:{SERVER_PORT}")
@@ -660,3 +930,9 @@ else:
         xhs_service._pg_init()
     except Exception as e:
         print(f"[startup] xhs init warning: {e}")
+    try:
+        dy_service._ensure_presets_file()
+        dy_service._ensure_reports_dir()
+        dy_service._pg_init()
+    except Exception as e:
+        print(f"[startup] dy init warning: {e}")

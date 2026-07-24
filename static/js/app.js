@@ -961,6 +961,7 @@ async function init() {
   setupTabs();
   setupFavoriteControls();
   setupXhsAnalyze();
+  setupDyAnalyze();
   $("#btnAnalyze").addEventListener("click", runAnalysis);
   $("#btnDeepAnalyze").addEventListener("click", runDeepAnalysis);
   $("#btnTempMode").addEventListener("click", () => setMapMode("temp"));
@@ -983,6 +984,9 @@ async function init() {
     }
     if (!health.has_xhs_api_key) {
       showToast("未检测到小红书 API Key（XHS_API_KEY），小红书分析暂不可用");
+    }
+    if (!health.has_tikhub_api_key) {
+      showToast("未检测到 TikHub API Key（TIKHUB_API_KEY），抖音分析暂不可用");
     }
     if (health.brand_loaded === false) {
       showToast("未找到品牌资料文件，AI 将使用内置基诺浦知识库");
@@ -1806,6 +1810,479 @@ function setupXhsAnalyze() {
     }
     if (btn?.dataset.action === "open" || !btn) {
       openXhsHistoryReport(id).catch((err) => showToast(err.message));
+    }
+  });
+}
+
+/* —— 抖音内容抓取分析 —— */
+const DY_TYPE_LABELS = {
+  category_scene: "品类场景洞察",
+  competitor_sentiment: "竞品舆情深挖",
+  competitor_seeding: "竞品种草对比",
+};
+const DY_TYPE_KEYS = {
+  品类场景洞察: "category_scene",
+  竞品舆情深挖: "competitor_sentiment",
+  竞品种草对比: "competitor_seeding",
+};
+
+let dyPresets = [];
+let dyLastSelection = null;
+let dyReportMd = "";
+let dyReportMeta = null;
+let dyReportFilename = "抖音分析报告.md";
+let dyJobId = null;
+let dyJobTimer = null;
+let dyAnalyzing = false;
+
+function dyAnalysisTypeToDisplay(value) {
+  if (!value) return "品类场景洞察";
+  return DY_TYPE_LABELS[value] || value;
+}
+
+function dyAnalysisTypeToStore(display) {
+  const t = (display || "").trim();
+  return DY_TYPE_KEYS[t] || t || "品类场景洞察";
+}
+
+function getDyFormValues() {
+  const fetchCount = Math.max(1, Math.min(50, parseInt($("#dyFetchCount").value, 10) || 20));
+  return {
+    preset_id: $("#dyPresetSelect").value || "",
+    analysis_type: dyAnalysisTypeToStore($("#dyAnalysisType").value),
+    keyword: ($("#dyKeyword").value || "").trim(),
+    sort_type: $("#dySortType").value,
+    note_time: $("#dyNoteTime").value,
+    fetch_count: fetchCount,
+    fetch_comments: $("#dyFetchComments").checked,
+    extra_prompt: ($("#dyExtraPrompt").value || "").trim(),
+  };
+}
+
+function fillDyForm(data) {
+  if (!data) return;
+  if (data.preset_id) $("#dyPresetSelect").value = data.preset_id;
+  $("#dyAnalysisType").value = dyAnalysisTypeToDisplay(data.analysis_type);
+  if (data.keyword != null) $("#dyKeyword").value = data.keyword;
+  if (data.sort_type) $("#dySortType").value = data.sort_type;
+  if (data.note_time) $("#dyNoteTime").value = data.note_time;
+  if (data.fetch_count != null) $("#dyFetchCount").value = data.fetch_count;
+  $("#dyFetchComments").checked = !!data.fetch_comments;
+  if (data.extra_prompt != null) $("#dyExtraPrompt").value = data.extra_prompt;
+}
+
+function renderDyPresetOptions(selectedId) {
+  const sel = $("#dyPresetSelect");
+  sel.innerHTML = dyPresets
+    .map((p) => {
+      const tag = p.system ? "系统" : "自定义";
+      return `<option value="${escapeHtml(p.id)}">[${tag}] ${escapeHtml(p.name)}</option>`;
+    })
+    .join("");
+  if (selectedId && dyPresets.some((p) => p.id === selectedId)) {
+    sel.value = selectedId;
+  }
+}
+
+async function loadDyPresets() {
+  const res = await fetch("/api/dy/presets");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "加载预设失败");
+  dyPresets = data.presets || [];
+  dyLastSelection = data.last_selection || null;
+  const selected = dyLastSelection?.preset_id || dyPresets[0]?.id;
+  renderDyPresetOptions(selected);
+  fillDyForm(dyLastSelection || dyPresets[0]);
+}
+
+function currentDyPreset() {
+  const id = $("#dyPresetSelect").value;
+  return dyPresets.find((p) => p.id === id) || null;
+}
+
+function applySelectedDyPreset() {
+  const p = currentDyPreset();
+  if (!p) return;
+  fillDyForm({ ...p, preset_id: p.id });
+}
+
+function openDyModal() {
+  $("#dyModal").classList.remove("hidden");
+  switchDyPane("report");
+  if (dyAnalyzing) {
+    setDyProgress(Number($("#dyProgressPct")?.textContent) || 5, "分析仍在后台进行中…", true);
+    $("#btnDyRun").disabled = true;
+  }
+  loadDyPresets().catch((err) => showToast(err.message));
+}
+
+function closeDyModal() {
+  $("#dyModal").classList.add("hidden");
+}
+
+function switchDyPane(pane) {
+  const isHistory = pane === "history";
+  $("#btnDyTabReport").classList.toggle("active", !isHistory);
+  $("#btnDyTabHistory").classList.toggle("active", isHistory);
+  $("#dyResultBody").classList.toggle("hidden", isHistory);
+  $("#dyHistoryBody").classList.toggle("hidden", !isHistory);
+  if (isHistory) {
+    loadDyHistory().catch((err) => showToast(err.message));
+  }
+}
+
+function setDyReport(reportMd, meta) {
+  dyReportMd = reportMd || "";
+  dyReportMeta = meta || null;
+  dyReportFilename = (meta?.filename || "抖音分析报告.md").replace(/\.md$/i, "") + ".md";
+  const metaText = meta
+    ? `${meta.created_at ? meta.created_at + " · " : ""}${meta.analysis_type_name || ""} · 关键词「${meta.keyword || ""}」 · 样本 ${meta.sample_count || 0} 条`
+    : "尚未生成";
+  $("#dyResultMeta").textContent = metaText;
+  $("#dyResultBody").innerHTML = dyReportMd
+    ? renderMarkdownToHtml(dyReportMd)
+    : '<p class="ai-placeholder">报告将显示在这里，支持预览、下载与历史回看。</p>';
+  const has = !!dyReportMd;
+  $("#btnDyPreview").disabled = !has;
+  $("#btnDyDownload").disabled = !has;
+  $("#btnDyDownloadHtml").disabled = !has;
+}
+
+async function loadDyHistory() {
+  const box = $("#dyHistoryList");
+  box.innerHTML = '<div class="ai-loading"><div class="spinner"></div>加载历史记录…</div>';
+  let res;
+  try {
+    res = await fetch("/api/dy/reports?limit=100");
+  } catch (err) {
+    box.innerHTML = `<p class="ai-placeholder" style="color:#c44a2e">无法连接服务：${escapeHtml(err.message)}</p>`;
+    throw err;
+  }
+  const raw = await res.text();
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (_) {
+    box.innerHTML = '<p class="ai-placeholder" style="color:#c44a2e">历史接口不可用（服务可能未重启）。</p>';
+    throw new Error("历史接口返回非 JSON");
+  }
+  if (!res.ok) throw new Error(data.error || "加载历史失败");
+  const reports = data.reports || [];
+  if (!reports.length) {
+    box.innerHTML = '<p class="ai-placeholder">暂无历史报告。完成一次分析后会自动保存在这里。</p>';
+    return;
+  }
+  box.innerHTML = reports
+    .map((r) => {
+      const sub = [
+        r.created_at || "",
+        r.analysis_type_name || "",
+        r.keyword ? `关键词「${r.keyword}」` : "",
+        r.sample_count ? `${r.sample_count} 条样本` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return `<article class="xhs-history-item" data-id="${escapeHtml(r.id)}">
+        <div class="xhs-history-main">
+          <h4>${escapeHtml(r.title || r.keyword || r.id)}</h4>
+          <p>${escapeHtml(sub)}</p>
+        </div>
+        <div class="xhs-history-item-actions">
+          <button type="button" class="btn-secondary btn-sm" data-action="open">查看</button>
+          <button type="button" class="btn-secondary btn-sm danger" data-action="delete">删除</button>
+        </div>
+      </article>`;
+    })
+    .join("");
+}
+
+async function openDyHistoryReport(reportId) {
+  const res = await fetch(`/api/dy/reports/${encodeURIComponent(reportId)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "打开报告失败");
+  setDyReport(data.report_md, data.meta);
+  switchDyPane("report");
+  showToast("已打开历史报告");
+}
+
+async function deleteDyHistoryReport(reportId) {
+  if (!window.confirm("确认删除这份历史报告？此操作不可恢复。")) return;
+  const res = await fetch(`/api/dy/reports/${encodeURIComponent(reportId)}`, { method: "DELETE" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "删除失败");
+  if (dyReportMeta?.id === reportId) {
+    setDyReport("", null);
+  }
+  await loadDyHistory();
+  showToast("历史报告已删除");
+}
+
+async function saveDyPresetAsNew() {
+  const values = getDyFormValues();
+  if (!values.keyword) {
+    showToast("请先填写关键词");
+    return;
+  }
+  const name = window.prompt("新预设名称", `${values.keyword}分析`);
+  if (name == null) return;
+  const res = await fetch("/api/dy/presets", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...values, name: name.trim() || values.keyword }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "保存预设失败");
+  await loadDyPresets();
+  $("#dyPresetSelect").value = data.preset.id;
+  fillDyForm({ ...data.preset, preset_id: data.preset.id });
+  showToast("已新增预设");
+}
+
+async function updateCurrentDyPreset() {
+  const p = currentDyPreset();
+  if (!p) {
+    showToast("请先选择预设");
+    return;
+  }
+  const values = getDyFormValues();
+  const name = window.prompt("预设名称", p.name);
+  if (name == null) return;
+  const res = await fetch(`/api/dy/presets/${encodeURIComponent(p.id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...values, name: name.trim() || p.name }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "更新失败");
+  await loadDyPresets();
+  $("#dyPresetSelect").value = data.preset.id;
+  fillDyForm({ ...data.preset, preset_id: data.preset.id });
+  showToast(p.system ? "系统预设已更新" : "预设已更新");
+}
+
+async function deleteCurrentDyPreset() {
+  const p = currentDyPreset();
+  if (!p) return;
+  if (p.system) {
+    showToast("系统预设不可删除");
+    return;
+  }
+  if (!window.confirm(`确认删除预设「${p.name}」？`)) return;
+  const res = await fetch(`/api/dy/presets/${encodeURIComponent(p.id)}`, { method: "DELETE" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "删除失败");
+  await loadDyPresets();
+  showToast("预设已删除");
+}
+
+function setDyProgress(percent, message, visible = true) {
+  const wrap = $("#dyProgressWrap");
+  if (!wrap) return;
+  wrap.classList.toggle("hidden", !visible);
+  const pct = Math.max(0, Math.min(100, Math.round(percent || 0)));
+  $("#dyProgressBar").style.width = `${pct}%`;
+  $("#dyProgressPct").textContent = `${pct}%`;
+  if (message) $("#dyProgressText").textContent = message;
+  $("#dyRunningDot")?.classList.toggle("hidden", !dyAnalyzing);
+}
+
+function stopDyJobPolling() {
+  if (dyJobTimer) {
+    clearInterval(dyJobTimer);
+    dyJobTimer = null;
+  }
+}
+
+function finishDyJobUi(ok, message) {
+  dyAnalyzing = false;
+  stopDyJobPolling();
+  $("#btnDyRun").disabled = false;
+  $("#dyRunningDot")?.classList.add("hidden");
+  setDyProgress(100, message || (ok ? "分析完成" : "分析失败"), true);
+}
+
+async function pollDyJobOnce(jobId) {
+  const res = await fetch(`/api/dy/analyze/status/${encodeURIComponent(jobId)}`);
+  const raw = await res.text();
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (_) {
+    throw new Error("进度接口异常，请重启 server.py");
+  }
+  if (!res.ok) throw new Error(data.error || "查询进度失败");
+
+  setDyProgress(data.percent || 0, data.message || "进行中…", true);
+  $("#dyStatusHint").textContent = data.message || "分析进行中…";
+  if ($("#dyResultBody") && dyAnalyzing) {
+    $("#dyResultBody").innerHTML = `<div class="ai-loading"><div class="spinner"></div>${escapeHtml(
+      data.message || "分析进行中…"
+    )}（${Math.round(data.percent || 0)}%）</div>`;
+  }
+
+  if (data.status === "done") {
+    const result = data.result || {};
+    setDyReport(result.report_md, result.meta);
+    switchDyPane("report");
+    finishDyJobUi(true, "分析完成");
+    const savedHint = result.meta?.id ? "已写入历史记录。" : "";
+    $("#dyStatusHint").textContent = `完成：共分析 ${result.meta?.sample_count || 0} 条视频。${savedHint}可预览、下载或到「历史记录」回看。`;
+    showToast(result.meta?.id ? "分析完成，已保存到历史" : "抖音分析完成");
+    return true;
+  }
+  if (data.status === "error") {
+    finishDyJobUi(false, data.error || "分析失败");
+    $("#dyResultBody").innerHTML = `<p class="ai-placeholder" style="color:#c44a2e">分析失败：${escapeHtml(
+      data.error || "未知错误"
+    )}</p>`;
+    $("#dyStatusHint").textContent = "分析失败，请检查 API Key、关键词或稍后重试。";
+    showToast(data.error || "分析失败");
+    return true;
+  }
+  return false;
+}
+
+function startDyJobPolling(jobId) {
+  stopDyJobPolling();
+  dyJobId = jobId;
+  dyJobTimer = setInterval(() => {
+    pollDyJobOnce(jobId).catch((err) => {
+      finishDyJobUi(false, err.message);
+      $("#dyStatusHint").textContent = err.message;
+      showToast(err.message);
+    });
+  }, 800);
+  pollDyJobOnce(jobId).catch((err) => {
+    finishDyJobUi(false, err.message);
+    showToast(err.message);
+  });
+}
+
+async function runDyAnalyze() {
+  if (dyAnalyzing) {
+    showToast("已有分析任务在进行中");
+    return;
+  }
+  const values = getDyFormValues();
+  if (!values.keyword) {
+    showToast("请填写关键词");
+    return;
+  }
+  if (!(values.analysis_type || "").trim()) {
+    showToast("请填写分析类型");
+    return;
+  }
+
+  $("#btnDyRun").disabled = true;
+  dyAnalyzing = true;
+  setDyProgress(3, "提交任务…", true);
+  $("#dyStatusHint").textContent = "已开始分析；关闭弹窗也不会中断。";
+  setDyReport("", null);
+  switchDyPane("report");
+  $("#dyResultBody").innerHTML = '<div class="ai-loading"><div class="spinner"></div>任务启动中…</div>';
+
+  try {
+    const res = await fetch("/api/dy/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(values),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "启动分析失败");
+    if (data.job_id) {
+      setDyProgress(5, "任务已启动…", true);
+      startDyJobPolling(data.job_id);
+      return;
+    }
+    if (data.report_md) {
+      setDyReport(data.report_md, data.meta);
+      switchDyPane("report");
+      finishDyJobUi(true, "分析完成");
+      $("#dyStatusHint").textContent = `完成：共分析 ${data.meta?.sample_count || 0} 条视频。`;
+      showToast("抖音分析完成");
+      return;
+    }
+    throw new Error("未返回任务 ID。请重启 server.py。");
+  } catch (err) {
+    finishDyJobUi(false, err.message);
+    $("#dyResultBody").innerHTML = `<p class="ai-placeholder" style="color:#c44a2e">分析失败：${escapeHtml(err.message)}</p>`;
+    $("#dyStatusHint").textContent = "分析失败，请检查 API Key、关键词或稍后重试。";
+    showToast(err.message);
+  }
+}
+
+function downloadDyReport() {
+  if (!dyReportMd) return;
+  const blob = new Blob([dyReportMd], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = dyReportFilename || "抖音分析报告.md";
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadDyReportHtml() {
+  if (!dyReportMd) return;
+  const htmlName = (dyReportFilename || "抖音分析报告.md").replace(/\.md$/i, "") + ".html";
+  const html = buildReadableReportHtml(dyReportMd, dyReportMeta, htmlName);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = htmlName;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function previewDyReport() {
+  if (!dyReportMd) return;
+  const w = window.open("", "_blank");
+  if (!w) {
+    showToast("浏览器拦截了预览窗口");
+    return;
+  }
+  w.document.write(buildReadableReportHtml(dyReportMd, dyReportMeta, dyReportFilename));
+  w.document.close();
+}
+
+function setupDyAnalyze() {
+  $("#btnDyAnalyze").addEventListener("click", openDyModal);
+  $("#btnDyClose").addEventListener("click", closeDyModal);
+  $("#dyModal").addEventListener("click", (e) => {
+    if (e.target === $("#dyModal")) closeDyModal();
+  });
+  $("#dyPresetSelect").addEventListener("change", applySelectedDyPreset);
+  $("#btnDySavePreset").addEventListener("click", () => {
+    saveDyPresetAsNew().catch((err) => showToast(err.message));
+  });
+  $("#btnDyUpdatePreset").addEventListener("click", () => {
+    updateCurrentDyPreset().catch((err) => showToast(err.message));
+  });
+  $("#btnDyDeletePreset").addEventListener("click", () => {
+    deleteCurrentDyPreset().catch((err) => showToast(err.message));
+  });
+  $("#btnDyRun").addEventListener("click", runDyAnalyze);
+  $("#btnDyDownload").addEventListener("click", downloadDyReport);
+  $("#btnDyDownloadHtml").addEventListener("click", downloadDyReportHtml);
+  $("#btnDyPreview").addEventListener("click", previewDyReport);
+  $("#btnDyTabReport").addEventListener("click", () => switchDyPane("report"));
+  $("#btnDyTabHistory").addEventListener("click", () => switchDyPane("history"));
+  $("#btnDyRefreshHistory").addEventListener("click", () => {
+    loadDyHistory().catch((err) => showToast(err.message));
+  });
+  $("#dyHistoryList").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-action]");
+    const item = e.target.closest(".xhs-history-item");
+    if (!item) return;
+    const id = item.dataset.id;
+    if (!id) return;
+    if (btn?.dataset.action === "delete") {
+      deleteDyHistoryReport(id).catch((err) => showToast(err.message));
+      return;
+    }
+    if (btn?.dataset.action === "open" || !btn) {
+      openDyHistoryReport(id).catch((err) => showToast(err.message));
     }
   });
 }

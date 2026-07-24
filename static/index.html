@@ -48,6 +48,10 @@
           小红书内容抓取分析
           <span class="xhs-running-dot hidden" id="xhsRunningDot" title="分析进行中"></span>
         </button>
+        <button type="button" class="btn-xhs" id="btnDyAnalyze">
+          抖音内容抓取分析
+          <span class="xhs-running-dot hidden" id="dyRunningDot" title="分析进行中"></span>
+        </button>
       </div>
 
       <div class="sidebar-scroll-wrap">
@@ -268,6 +272,128 @@
               <button type="button" class="btn-secondary btn-sm" id="btnXhsRefreshHistory">刷新</button>
             </div>
             <div id="xhsHistoryList" class="xhs-history-list"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay hidden" id="dyModal" role="dialog" aria-modal="true" aria-labelledby="dyModalTitle">
+    <div class="modal-panel xhs-modal">
+      <header class="modal-header">
+        <div>
+          <p class="modal-kicker">独立功能 · 内部研究参考</p>
+          <h2 id="dyModalTitle">抖音内容抓取分析</h2>
+        </div>
+        <button type="button" class="btn-icon modal-close" id="btnDyClose" aria-label="关闭">×</button>
+      </header>
+
+      <div class="xhs-layout">
+        <section class="xhs-form-pane">
+          <label class="field">
+            <span>分析预设</span>
+            <div class="preset-row">
+              <select id="dyPresetSelect"></select>
+              <button type="button" class="btn-secondary btn-sm" id="btnDySavePreset">另存为</button>
+              <button type="button" class="btn-secondary btn-sm" id="btnDyUpdatePreset">保存修改</button>
+              <button type="button" class="btn-secondary btn-sm danger" id="btnDyDeletePreset">删除</button>
+            </div>
+          </label>
+
+          <label class="field">
+            <span>分析类型</span>
+            <input type="text" id="dyAnalysisType" list="dyAnalysisTypeList" placeholder="可下拉选择，也可自行填写" autocomplete="off" />
+            <datalist id="dyAnalysisTypeList">
+              <option value="品类场景洞察"></option>
+              <option value="竞品舆情深挖"></option>
+              <option value="竞品种草对比"></option>
+            </datalist>
+          </label>
+
+          <label class="field">
+            <span>关键词</span>
+            <input type="text" id="dyKeyword" placeholder="一个搜索词，如：学步鞋 / 稳稳鞋 / 泰兰尼斯" />
+            <p class="xhs-inline-hint">用于抖音搜索抓取；当前一次分析使用 1 个关键词。</p>
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span>抓取量</span>
+              <input type="number" id="dyFetchCount" min="1" max="50" value="20" />
+            </label>
+            <label class="field">
+              <span>排序</span>
+              <select id="dySortType">
+                <option value="general">综合</option>
+                <option value="popularity_descending">最热</option>
+                <option value="time_descending">最新</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>时间范围</span>
+              <select id="dyNoteTime">
+                <option value="不限">不限</option>
+                <option value="一天内">一天内</option>
+                <option value="一周内" selected>一周内</option>
+                <option value="一个月内">一个月内</option>
+                <option value="半年内">半年内</option>
+                <option value="一年内">一年内</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="field-checks">
+            <label class="check">
+              <input type="checkbox" id="dyFetchComments" />
+              <span>拉取热门评论（舆情更准，更耗时）</span>
+            </label>
+          </div>
+
+          <label class="field">
+            <span>补充分析要求</span>
+            <textarea id="dyExtraPrompt" rows="3" placeholder="例如：重点看价格争议、场景拆解、可执行选题…"></textarea>
+          </label>
+
+          <div class="xhs-actions">
+            <button type="button" class="btn-primary" id="btnDyRun">开始抓取分析</button>
+          </div>
+          <div class="xhs-progress hidden" id="dyProgressWrap">
+            <div class="xhs-progress-top">
+              <span id="dyProgressText">准备中…</span>
+              <span id="dyProgressPct">0%</span>
+            </div>
+            <div class="xhs-progress-track" aria-hidden="true">
+              <div class="xhs-progress-bar" id="dyProgressBar"></div>
+            </div>
+            <p class="xhs-inline-hint">关闭弹窗不会中断分析；完成后会提示，并可在历史记录中查看。</p>
+          </div>
+          <p class="xhs-hint" id="dyStatusHint">选择预设后可直接分析；关闭界面分析会继续跑。</p>
+        </section>
+
+        <section class="xhs-result-pane">
+          <header class="xhs-result-header">
+            <div>
+              <div class="xhs-pane-tabs" role="tablist">
+                <button type="button" class="xhs-pane-tab active" id="btnDyTabReport" data-pane="report">当前报告</button>
+                <button type="button" class="xhs-pane-tab" id="btnDyTabHistory" data-pane="history">历史记录</button>
+              </div>
+              <p id="dyResultMeta" class="xhs-result-meta">尚未生成</p>
+            </div>
+            <div class="xhs-result-actions">
+              <button type="button" class="btn-secondary btn-sm" id="btnDyPreview" disabled>预览</button>
+              <button type="button" class="btn-secondary btn-sm" id="btnDyDownloadHtml" disabled>下载网页</button>
+              <button type="button" class="btn-secondary btn-sm" id="btnDyDownload" disabled>下载 MD</button>
+            </div>
+          </header>
+          <div class="xhs-result-body" id="dyResultBody">
+            <p class="ai-placeholder">报告将显示在这里，支持预览、下载与历史回看。</p>
+          </div>
+          <div class="xhs-history-body hidden" id="dyHistoryBody">
+            <div class="xhs-history-toolbar">
+              <p class="xhs-inline-hint">保存在项目文件夹 <code>dy-reports/</code>，点击可回看。</p>
+              <button type="button" class="btn-secondary btn-sm" id="btnDyRefreshHistory">刷新</button>
+            </div>
+            <div id="dyHistoryList" class="xhs-history-list"></div>
           </div>
         </section>
       </div>

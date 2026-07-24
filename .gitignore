@@ -18,6 +18,8 @@ deploy/
 # 运行时数据（保留目录结构）
 xhs-reports/*.json
 xhs-reports/*.md
+dy-reports/*.json
+dy-reports/*.md
 
 # OS
 .DS_Store
