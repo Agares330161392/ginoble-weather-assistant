@@ -2288,20 +2288,20 @@ function setupDyAnalyze() {
 }
 
 // ---------------------------------------------------------------------------
-// 童装童鞋热榜
+// 童装童鞋双平台热榜（抖音 + 小红书）
 // ---------------------------------------------------------------------------
 
 function setupDyHot() {
   $("#btnDyHot").addEventListener("click", () => {
     openDyHotModal();
-    loadDyHotList();
+    loadBothHotLists();
   });
   $("#btnDyHotClose").addEventListener("click", closeDyHotModal);
   $("#dyHotModal").addEventListener("click", (e) => {
     if (e.target === $("#dyHotModal")) closeDyHotModal();
   });
   $("#btnDyHotRefresh").addEventListener("click", () => {
-    loadDyHotList();
+    loadBothHotLists();
   });
 }
 
@@ -2313,13 +2313,20 @@ function closeDyHotModal() {
   $("#dyHotModal").classList.add("hidden");
 }
 
+function loadBothHotLists() {
+  // 同时发起抖音和小红书请求
+  loadDyHotList();
+  loadXhsHotList();
+}
+
 async function loadDyHotList() {
   const body = $("#dyHotBody");
+  const status = $("#dyHotStatus");
   const dot = $("#dyHotDot");
-  const meta = $("#dyHotMeta");
   const btn = $("#btnDyHotRefresh");
 
-  body.innerHTML = `<p class="ai-placeholder">正在搜索童装童鞋相关视频并聚合热度，约需 15-30 秒…</p>`;
+  body.innerHTML = `<p class="ai-placeholder">搜索中…约 15-30 秒</p>`;
+  status.textContent = "加载中…";
   dot.classList.remove("hidden");
   btn.disabled = true;
   btn.textContent = "加载中…";
@@ -2331,20 +2338,17 @@ async function loadDyHotList() {
 
     const items = data.items || [];
     if (items.length === 0) {
-      body.innerHTML = `<p class="ai-placeholder">暂无数据，请稍后重试。</p>`;
-      meta.textContent = "未获取到热榜数据。";
+      body.innerHTML = `<p class="ai-placeholder">暂无数据</p>`;
+      status.textContent = "无数据";
       return;
     }
 
-    const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
-    meta.textContent = `共 ${items.length} 条 · 更新于 ${now} · 按 赞+评 综合热度排序`;
+    status.textContent = `${items.length} 条`;
 
     body.innerHTML = items.map((item) => {
       const rankClass = item.rank <= 3 ? "dy-hot-rank-top" : "";
       const rankBadge = item.rank <= 3 ? ["🥇", "🥈", "🥉"][item.rank - 1] : item.rank;
-      const hotStr = item.hot_score >= 10000
-        ? (item.hot_score / 10000).toFixed(1) + "万"
-        : String(item.hot_score);
+      const hotStr = formatNum(item.hot_score);
       return `
         <div class="dy-hot-item ${rankClass}">
           <span class="dy-hot-rank">${rankBadge}</span>
@@ -2362,11 +2366,63 @@ async function loadDyHotList() {
         </div>`;
     }).join("");
   } catch (err) {
-    body.innerHTML = `<p class="ai-placeholder" style="color:var(--danger,#e74c3c);">${escapeHtml(err.message)}</p>`;
+    body.innerHTML = `<p class="ai-placeholder" style="color:#e74c3c;">${escapeHtml(err.message)}</p>`;
+    status.textContent = "失败";
   } finally {
     dot.classList.add("hidden");
     btn.disabled = false;
     btn.textContent = "刷新";
+  }
+}
+
+async function loadXhsHotList() {
+  const body = $("#xhsHotBody");
+  const status = $("#xhsHotStatus");
+
+  body.innerHTML = `<p class="ai-placeholder">搜索中…约 15-30 秒</p>`;
+  status.textContent = "加载中…";
+
+  try {
+    const resp = await fetch("/api/xhs/hot?top_n=20");
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "加载失败");
+
+    const items = data.items || [];
+    if (items.length === 0) {
+      body.innerHTML = `<p class="ai-placeholder">暂无数据</p>`;
+      status.textContent = "无数据";
+      return;
+    }
+
+    status.textContent = `${items.length} 条`;
+
+    body.innerHTML = items.map((item) => {
+      const rankClass = item.rank <= 3 ? "dy-hot-rank-top" : "";
+      const rankBadge = item.rank <= 3 ? ["🥇", "🥈", "🥉"][item.rank - 1] : item.rank;
+      const hotStr = formatNum(item.hot_score);
+      const noteUrl = item.note_id
+        ? `https://www.xiaohongshu.com/explore/${item.note_id}`
+        : "#";
+      return `
+        <div class="dy-hot-item ${rankClass}">
+          <span class="dy-hot-rank">${rankBadge}</span>
+          <div class="dy-hot-content">
+            <p class="dy-hot-title">${escapeHtml(item.title || "(无标题)")}</p>
+            <div class="dy-hot-stats">
+              <span class="dy-hot-author">@${escapeHtml(item.author || "未知")}</span>
+              <span>赞 ${formatNum(item.liked)}</span>
+              <span>藏 ${formatNum(item.collected)}</span>
+              <span>评 ${formatNum(item.commented)}</span>
+              <span class="dy-hot-score">🔥 ${hotStr}</span>
+              <span class="dy-hot-kw">${escapeHtml(item.source_keyword || "")}</span>
+            </div>
+          </div>
+          <a class="dy-hot-link" href="${noteUrl}" target="_blank" rel="noopener">查看</a>
+        </div>`;
+    }).join("");
+  } catch (err) {
+    body.innerHTML = `<p class="ai-placeholder" style="color:#e74c3c;">${escapeHtml(err.message)}</p>`;
+    status.textContent = "失败";
   }
 }
 

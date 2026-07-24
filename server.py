@@ -924,6 +924,38 @@ def dy_hot_list():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/xhs/hot", methods=["GET"])
+def xhs_hot_list():
+    """获取童装童鞋小红书垂直热榜（多关键词搜索聚合）。"""
+    xhs_key = load_xhs_api_key()
+    if not xhs_key:
+        return jsonify({"error": "未配置小红书 API Key"}), 500
+    top_n = int(request.args.get("top_n", 20))
+    top_n = max(1, min(top_n, 50))
+    try:
+        items = xhs_service.fetch_kids_hot_list(
+            api_key=xhs_key,
+            top_n=top_n,
+        )
+        result = []
+        for i, n in enumerate(items, 1):
+            result.append({
+                "rank": i,
+                "note_id": n.get("note_id"),
+                "xsec_token": n.get("xsec_token", ""),
+                "title": n.get("title"),
+                "author": n.get("author"),
+                "liked": n.get("liked", 0),
+                "collected": n.get("collected", 0),
+                "commented": n.get("commented", 0),
+                "hot_score": n.get("hot_score", 0),
+                "source_keyword": n.get("source_keyword"),
+            })
+        return jsonify({"items": result, "count": len(result)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     SERVER_PORT = int(os.environ.get("PORT", SERVER_PORT))
     print("基诺浦场景小助手")

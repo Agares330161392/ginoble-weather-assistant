@@ -412,6 +412,60 @@ def search_notes(
     return collected[:fetch_count]
 
 
+# ---------------------------------------------------------------------------
+# 童装童鞋垂直热榜（多关键词搜索 + 聚合排序）
+# ---------------------------------------------------------------------------
+
+KIDS_HOT_KEYWORDS = [
+    "童鞋", "童装", "学步鞋", "宝宝鞋", "儿童服装",
+    "婴儿鞋", "机能鞋", "儿童鞋", "宝宝穿搭", "母婴好物",
+]
+
+
+def fetch_kids_hot_list(
+    api_key: str,
+    top_n: int = 20,
+    per_keyword: int = 10,
+    session: str | None = None,
+) -> list[dict]:
+    """搜索多个童装童鞋关键词，按互动量聚合排序，返回热榜。
+
+    每个关键词搜索 per_keyword 条，去重后按 赞+藏+评 排序取 top_n。
+    """
+    aggregated: dict[str, dict] = {}
+
+    for kw in KIDS_HOT_KEYWORDS:
+        try:
+            notes = search_notes(
+                api_key=api_key,
+                keyword=kw,
+                fetch_count=per_keyword,
+                sort_type="popularity_descending",
+                session=session,
+            )
+        except Exception:
+            continue
+        for n in notes:
+            nid = n.get("note_id", "")
+            if not nid or nid in aggregated:
+                continue
+            score = n.get("liked", 0) + n.get("collected", 0) + n.get("commented", 0)
+            aggregated[nid] = {
+                **n,
+                "source_keyword": kw,
+                "hot_score": score,
+            }
+        time.sleep(0.1)
+
+    ranked = sorted(
+        aggregated.values(),
+        key=lambda x: x.get("hot_score", 0),
+        reverse=True,
+    )
+    return ranked[:top_n]
+
+
+
 def get_note_detail(api_key: str, note_id: str, xsec_token: str, session: str | None = None) -> dict:
     params = {"noteId": note_id, "xsecToken": xsec_token or ""}
     data = xhs_get(api_key, "/api/xhs/getNoteDetail", params=params, session=session)

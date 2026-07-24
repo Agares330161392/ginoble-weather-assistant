@@ -53,7 +53,7 @@
           <span class="xhs-running-dot hidden" id="dyRunningDot" title="分析进行中"></span>
         </button>
         <button type="button" class="btn-xhs" id="btnDyHot">
-          童装童鞋热榜
+          童装童鞋双平台热榜
           <span class="xhs-running-dot hidden" id="dyHotDot" title="加载中"></span>
         </button>
       </div>
@@ -404,24 +404,43 @@
     </div>
   </div>
 
-  <!-- 童装童鞋热榜 Modal -->
+  <!-- 童装童鞋双平台热榜 Modal -->
   <div class="modal-overlay hidden" id="dyHotModal" role="dialog" aria-modal="true" aria-labelledby="dyHotModalTitle">
-    <div class="modal-panel xhs-modal" style="max-width: 680px;">
+    <div class="modal-panel xhs-modal" style="max-width: 1080px;">
       <header class="modal-header">
         <div>
-          <p class="modal-kicker">垂直热榜 · 童装童鞋</p>
-          <h2 id="dyHotModalTitle">童装童鞋抖音热榜</h2>
+          <p class="modal-kicker">双平台垂直热榜 · 童装童鞋</p>
+          <h2 id="dyHotModalTitle">童装童鞋热榜</h2>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
           <button type="button" class="btn-secondary btn-sm" id="btnDyHotRefresh">刷新</button>
           <button type="button" class="btn-icon modal-close" id="btnDyHotClose" aria-label="关闭">×</button>
         </div>
       </header>
-      <div style="padding: 16px 24px 8px;">
-        <p class="xhs-inline-hint" id="dyHotMeta">点击「刷新」加载最新热榜，按 赞+评 综合热度排序，覆盖关键词：童鞋、童装、学步鞋、宝宝鞋、儿童服装、婴儿鞋、机能鞋、儿童鞋、宝宝穿搭、母婴好物。</p>
+      <div style="padding: 12px 24px 8px;">
+        <p class="xhs-inline-hint" id="dyHotMeta">点击「刷新」同时加载抖音与小红书热榜，按综合热度排序。覆盖关键词：童鞋、童装、学步鞋、宝宝鞋、儿童服装、婴儿鞋、机能鞋、儿童鞋、宝宝穿搭、母婴好物。</p>
       </div>
-      <div id="dyHotBody" style="padding: 0 24px 24px; max-height: 60vh; overflow-y: auto;">
-        <p class="ai-placeholder">点击「刷新」按钮加载热榜数据…</p>
+      <div class="hot-dual-layout">
+        <!-- 左栏：抖音 -->
+        <div class="hot-dual-col">
+          <div class="hot-dual-header">
+            <span class="hot-dual-badge hot-badge-dy">抖音</span>
+            <span class="hot-dual-status" id="dyHotStatus">等待加载…</span>
+          </div>
+          <div id="dyHotBody" class="hot-dual-body">
+            <p class="ai-placeholder">点击「刷新」按钮加载…</p>
+          </div>
+        </div>
+        <!-- 右栏：小红书 -->
+        <div class="hot-dual-col">
+          <div class="hot-dual-header">
+            <span class="hot-dual-badge hot-badge-xhs">小红书</span>
+            <span class="hot-dual-status" id="xhsHotStatus">等待加载…</span>
+          </div>
+          <div id="xhsHotBody" class="hot-dual-body">
+            <p class="ai-placeholder">点击「刷新」按钮加载…</p>
+          </div>
+        </div>
       </div>
     </div>
   </div>
