@@ -393,6 +393,56 @@ def search_videos(
     return collected[:fetch_count]
 
 
+# ---------------------------------------------------------------------------
+# 童装童鞋垂直热榜（多关键词搜索 + 聚合排序）
+# ---------------------------------------------------------------------------
+
+KIDS_HOT_KEYWORDS = [
+    "童鞋", "童装", "学步鞋", "宝宝鞋", "儿童服装",
+    "婴儿鞋", "机能鞋", "儿童鞋", "宝宝穿搭", "母婴好物",
+]
+
+
+def fetch_kids_hot_list(
+    api_key: str,
+    top_n: int = 20,
+    per_keyword: int = 10,
+) -> list[dict]:
+    """搜索多个童装童鞋关键词，按互动量聚合排序，返回热榜。
+
+    每个关键词搜索 per_keyword 条，去重后按 赞+评 排序取 top_n。
+    """
+    aggregated: dict[str, dict] = {}
+
+    for kw in KIDS_HOT_KEYWORDS:
+        try:
+            videos = search_videos(
+                api_key=api_key,
+                keyword=kw,
+                fetch_count=per_keyword,
+            )
+        except Exception:
+            continue
+        for v in videos:
+            aid = v.get("aweme_id", "")
+            if not aid or aid in aggregated:
+                continue
+            score = v.get("liked", 0) + v.get("commented", 0)
+            aggregated[aid] = {
+                **v,
+                "source_keyword": kw,
+                "hot_score": score,
+            }
+        time.sleep(0.1)
+
+    ranked = sorted(
+        aggregated.values(),
+        key=lambda x: x.get("hot_score", 0),
+        reverse=True,
+    )
+    return ranked[:top_n]
+
+
 def normalize_search_item(item: dict) -> dict | None:
     """标准化搜索结果中的视频条目。
 

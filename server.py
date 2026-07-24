@@ -894,6 +894,36 @@ def dy_reports_delete(report_id: str):
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/dy/hot", methods=["GET"])
+def dy_hot_list():
+    """获取童装童鞋垂直热榜（多关键词搜索聚合）。"""
+    tikhub_key = load_tikhub_api_key()
+    if not tikhub_key:
+        return jsonify({"error": "未配置 TikHub API Key"}), 500
+    top_n = int(request.args.get("top_n", 20))
+    top_n = max(1, min(top_n, 50))
+    try:
+        items = dy_service.fetch_kids_hot_list(
+            api_key=tikhub_key,
+            top_n=top_n,
+        )
+        result = []
+        for i, v in enumerate(items, 1):
+            result.append({
+                "rank": i,
+                "aweme_id": v.get("aweme_id"),
+                "title": v.get("title"),
+                "author": v.get("author"),
+                "liked": v.get("liked", 0),
+                "commented": v.get("commented", 0),
+                "hot_score": v.get("hot_score", 0),
+                "source_keyword": v.get("source_keyword"),
+            })
+        return jsonify({"items": result, "count": len(result)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     SERVER_PORT = int(os.environ.get("PORT", SERVER_PORT))
     print("基诺浦场景小助手")

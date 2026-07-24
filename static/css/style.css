@@ -1777,3 +1777,81 @@ body {
     align-items: flex-start;
   }
 }
+
+/* ===== 童装童鞋热榜 ===== */
+.dy-hot-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 6px;
+  background: var(--surface);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transition: background 0.15s;
+}
+.dy-hot-item:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+.dy-hot-rank-top {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.08), rgba(255, 140, 0, 0.05));
+  border-color: rgba(255, 165, 0, 0.2);
+}
+.dy-hot-rank {
+  font-size: 1.15rem;
+  font-weight: 700;
+  min-width: 32px;
+  text-align: center;
+  color: var(--muted, #888);
+}
+.dy-hot-rank-top .dy-hot-rank {
+  font-size: 1.3rem;
+}
+.dy-hot-content {
+  flex: 1;
+  min-width: 0;
+}
+.dy-hot-title {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  margin: 0 0 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.dy-hot-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--muted, #888);
+}
+.dy-hot-author {
+  color: var(--primary, #4a6cf7);
+  font-weight: 500;
+}
+.dy-hot-score {
+  color: #ff6b35;
+  font-weight: 600;
+}
+.dy-hot-kw {
+  background: rgba(0, 0, 0, 0.04);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+}
+.dy-hot-link {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--primary, #4a6cf7);
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid var(--primary, #4a6cf7);
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.dy-hot-link:hover {
+  background: var(--primary, #4a6cf7);
+  color: #fff;
+}

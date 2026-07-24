@@ -2287,4 +2287,101 @@ function setupDyAnalyze() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// 童装童鞋热榜
+// ---------------------------------------------------------------------------
+
+function setupDyHot() {
+  $("#btnDyHot").addEventListener("click", () => {
+    openDyHotModal();
+    loadDyHotList();
+  });
+  $("#btnDyHotClose").addEventListener("click", closeDyHotModal);
+  $("#dyHotModal").addEventListener("click", (e) => {
+    if (e.target === $("#dyHotModal")) closeDyHotModal();
+  });
+  $("#btnDyHotRefresh").addEventListener("click", () => {
+    loadDyHotList();
+  });
+}
+
+function openDyHotModal() {
+  $("#dyHotModal").classList.remove("hidden");
+}
+
+function closeDyHotModal() {
+  $("#dyHotModal").classList.add("hidden");
+}
+
+async function loadDyHotList() {
+  const body = $("#dyHotBody");
+  const dot = $("#dyHotDot");
+  const meta = $("#dyHotMeta");
+  const btn = $("#btnDyHotRefresh");
+
+  body.innerHTML = `<p class="ai-placeholder">正在搜索童装童鞋相关视频并聚合热度，约需 15-30 秒…</p>`;
+  dot.classList.remove("hidden");
+  btn.disabled = true;
+  btn.textContent = "加载中…";
+
+  try {
+    const resp = await fetch("/api/dy/hot?top_n=20");
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "加载失败");
+
+    const items = data.items || [];
+    if (items.length === 0) {
+      body.innerHTML = `<p class="ai-placeholder">暂无数据，请稍后重试。</p>`;
+      meta.textContent = "未获取到热榜数据。";
+      return;
+    }
+
+    const now = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+    meta.textContent = `共 ${items.length} 条 · 更新于 ${now} · 按 赞+评 综合热度排序`;
+
+    body.innerHTML = items.map((item) => {
+      const rankClass = item.rank <= 3 ? "dy-hot-rank-top" : "";
+      const rankBadge = item.rank <= 3 ? ["🥇", "🥈", "🥉"][item.rank - 1] : item.rank;
+      const hotStr = item.hot_score >= 10000
+        ? (item.hot_score / 10000).toFixed(1) + "万"
+        : String(item.hot_score);
+      return `
+        <div class="dy-hot-item ${rankClass}">
+          <span class="dy-hot-rank">${rankBadge}</span>
+          <div class="dy-hot-content">
+            <p class="dy-hot-title">${escapeHtml(item.title || "(无标题)")}</p>
+            <div class="dy-hot-stats">
+              <span class="dy-hot-author">@${escapeHtml(item.author || "未知")}</span>
+              <span>赞 ${formatNum(item.liked)}</span>
+              <span>评 ${formatNum(item.commented)}</span>
+              <span class="dy-hot-score">🔥 ${hotStr}</span>
+              <span class="dy-hot-kw">${escapeHtml(item.source_keyword || "")}</span>
+            </div>
+          </div>
+          <a class="dy-hot-link" href="https://www.douyin.com/video/${item.aweme_id}" target="_blank" rel="noopener">查看</a>
+        </div>`;
+    }).join("");
+  } catch (err) {
+    body.innerHTML = `<p class="ai-placeholder" style="color:var(--danger,#e74c3c);">${escapeHtml(err.message)}</p>`;
+  } finally {
+    dot.classList.add("hidden");
+    btn.disabled = false;
+    btn.textContent = "刷新";
+  }
+}
+
+function formatNum(n) {
+  n = parseInt(n, 10) || 0;
+  if (n >= 10000) return (n / 10000).toFixed(1) + "万";
+  return String(n);
+}
+
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s || "";
+  return d.innerHTML;
+}
+
+setupDyHot();
+
 init();
