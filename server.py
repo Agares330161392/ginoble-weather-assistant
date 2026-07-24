@@ -21,6 +21,7 @@ KEY_ENV_CANDIDATES = [BASE_DIR / "key.env", BASE_DIR.parent / "key.env"]
 BRAND_FILE_CANDIDATES = [BASE_DIR / "ginoble_brand.txt", BASE_DIR.parent / "ginoble_brand.txt"]
 SERVER_PORT = 5000
 HOT_CACHE_DIR = BASE_DIR / "hot_cache"
+WEATHER_REPORTS_DIR = BASE_DIR / "weather-reports"
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -392,7 +393,14 @@ def analyze():
     weather_text = build_weather_summary(city_name, province, weather_data)
     try:
         analysis = call_qwen(api_key, city_name, province, weather_text, mode="deep" if deep else "base")
-        return jsonify({"analysis": analysis, "weather_summary": weather_text})
+        # 保存天气分析报告
+        saved = _wtr_save_report(analysis, {
+            "city": city_name,
+            "province": province,
+            "analysis_type": "deep" if deep else "base",
+            "weather_summary": weather_text,
+        })
+        return jsonify({"analysis": analysis, "weather_summary": weather_text, "report_id": saved.get("id")})
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 500
     except requests.RequestException as e:
@@ -1129,6 +1137,121 @@ def dy_reports_calendar():
     return jsonify({"dates": sorted(dates, reverse=True)})
 
 
+# ---------------------------------------------------------------------------
+# 天气分析报告 API
+# ---------------------------------------------------------------------------
+
+def _wtr_ensure_dir() -> Path:
+    WEATHER_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    keep = WEATHER_REPORTS_DIR / ".gitkeep"
+    if not keep.exists():
+        keep.write_text("", encoding="utf-8")
+    return WEATHER_REPORTS_DIR
+
+
+def _wtr_save_report(report_md: str, meta: dict) -> dict:
+    """保存天气分析报告到 weather-reports/ 目录。"""
+    _wtr_ensure_dir()
+    stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_id = f"wtr_{stamp}_{uuid.uuid4().hex[:6]}"
+    title = f"{meta.get('city', '未知城市')} · {'深度' if meta.get('analysis_type') == 'deep' else '基础'}分析"
+    record = {
+        **meta,
+        "id": report_id,
+        "title": title,
+        "created_at": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "filename_md": f"{report_id}.md",
+        "filename_meta": f"{report_id}.json",
+    }
+    try:
+        md_path = WEATHER_REPORTS_DIR / f"{report_id}.md"
+        meta_path = WEATHER_REPORTS_DIR / f"{report_id}.json"
+        md_path.write_text(report_md or "", encoding="utf-8")
+        meta_path.write_text(_json_module.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"[wtr] save report failed: {e}")
+    return record
+
+
+def _wtr_list_reports(limit: int = 100, date_filter: str = "") -> list:
+    _wtr_ensure_dir()
+    items = []
+    for meta_path in WEATHER_REPORTS_DIR.glob("*.json"):
+        try:
+            data = _json_module.loads(meta_path.read_text(encoding="utf-8"))
+            if date_filter:
+                created = data.get("created_at", "")
+                if not created.startswith(date_filter):
+                    continue
+            items.append(data)
+        except Exception:
+            continue
+    items.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    return items[:limit]
+
+
+def _wtr_get_report(report_id: str) -> dict:
+    safe_id = report_id.replace("/", "").replace("\\", "").replace("..", "")
+    meta_path = WEATHER_REPORTS_DIR / f"{safe_id}.json"
+    md_path = WEATHER_REPORTS_DIR / f"{safe_id}.md"
+    if not meta_path.exists():
+        return None
+    data = _json_module.loads(meta_path.read_text(encoding="utf-8"))
+    data["report_md"] = md_path.read_text(encoding="utf-8") if md_path.exists() else ""
+    return data
+
+
+@app.route("/api/weather/reports", methods=["GET"])
+def weather_reports_list():
+    try:
+        limit = int(request.args.get("limit", 100))
+    except (TypeError, ValueError):
+        limit = 100
+    date_filter = request.args.get("date", "")
+    reports = _wtr_list_reports(limit=limit, date_filter=date_filter)
+    # 不返回完整报告正文，只返回元数据
+    for r in reports:
+        r.pop("report_md", None)
+    return jsonify({"reports": reports})
+
+
+@app.route("/api/weather/reports/<report_id>", methods=["GET"])
+def weather_reports_get(report_id: str):
+    data = _wtr_get_report(report_id)
+    if not data:
+        return jsonify({"error": "报告不存在"}), 404
+    return jsonify(data)
+
+
+@app.route("/api/weather/reports/<report_id>", methods=["DELETE"])
+def weather_reports_delete(report_id: str):
+    safe_id = report_id.replace("/", "").replace("\\", "").replace("..", "")
+    meta_path = WEATHER_REPORTS_DIR / f"{safe_id}.json"
+    md_path = WEATHER_REPORTS_DIR / f"{safe_id}.md"
+    deleted = False
+    if meta_path.exists():
+        meta_path.unlink()
+        deleted = True
+    if md_path.exists():
+        md_path.unlink()
+        deleted = True
+    if not deleted:
+        return jsonify({"error": "报告不存在"}), 404
+    return jsonify({"ok": True})
+
+
+@app.route("/api/weather/reports/calendar", methods=["GET"])
+def weather_reports_calendar():
+    """返回天气报告存在的日期列表。"""
+    reports = _wtr_list_reports(limit=500)
+    dates = set()
+    for r in reports:
+        created = r.get("created_at", "")
+        if created and len(created) >= 10:
+            dates.add(created[:10])
+    return jsonify({"dates": sorted(dates, reverse=True)})
+
+
 if __name__ == "__main__":
     SERVER_PORT = int(os.environ.get("PORT", SERVER_PORT))
     print("基诺浦场景小助手")
@@ -1151,6 +1274,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[startup] dy pg init warning: {e}")
     load_tikhub_api_key()
+    _wtr_ensure_dir()
     host = os.environ.get("HOST", "127.0.0.1")
     if host != "127.0.0.1":
         _open_browser_once(f"http://0.0.0.0:{SERVER_PORT}")
@@ -1171,3 +1295,7 @@ else:
         dy_service._pg_init()
     except Exception as e:
         print(f"[startup] dy init warning: {e}")
+    try:
+        _wtr_ensure_dir()
+    except Exception as e:
+        print(f"[startup] weather reports dir warning: {e}")

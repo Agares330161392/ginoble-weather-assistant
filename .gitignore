@@ -21,6 +21,8 @@ xhs-reports/*.md
 dy-reports/*.json
 dy-reports/*.md
 hot_cache/*.json
+weather-reports/*.json
+weather-reports/*.md
 
 # OS
 .DS_Store

@@ -49,6 +49,17 @@ let mapMode = "temp";
 
 const $ = (sel) => document.querySelector(sel);
 
+// 七大地理分区 → 省份名映射
+const GEO_REGIONS = {
+  "华北": ["北京", "天津", "河北", "山西", "内蒙古"],
+  "东北": ["辽宁", "吉林", "黑龙江"],
+  "华东": ["上海", "江苏", "浙江", "安徽", "福建", "江西", "山东"],
+  "华中": ["河南", "湖北", "湖南"],
+  "华南": ["广东", "广西", "海南"],
+  "西南": ["重庆", "四川", "贵州", "云南", "西藏"],
+  "西北": ["陕西", "甘肃", "青海", "宁夏", "新疆"],
+};
+
 function cityKey(c) {
   return `${c.province}-${c.name}`;
 }
@@ -258,9 +269,13 @@ async function loadCities() {
   }
 }
 
-function renderProvinceNav() {
+function renderProvinceNav(filterRegion) {
   const nav = $("#provinceNav");
-  nav.innerHTML = provinces
+  let list = provinces;
+  if (filterRegion && filterRegion !== "all" && GEO_REGIONS[filterRegion]) {
+    list = provinces.filter((p) => GEO_REGIONS[filterRegion].includes(p.name));
+  }
+  nav.innerHTML = list
     .map(
       (p) => `
     <div class="province-block">
@@ -955,6 +970,138 @@ function setupTabs() {
   });
 }
 
+// ===== 首页导航 =====
+function showHomePage() {
+  $("#homePage").classList.remove("hidden");
+  $("#weatherPage").classList.add("hidden");
+  document.title = "基诺浦场景小助手 · 首页";
+}
+
+function showWeatherPage() {
+  $("#homePage").classList.add("hidden");
+  $("#weatherPage").classList.remove("hidden");
+  document.title = "基诺浦场景小助手 · 全国天气趋势";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  initWeatherReportCalendar();
+}
+
+function setupHomePage() {
+  $("#moduleXhs").addEventListener("click", openXhsModal);
+  $("#moduleDy").addEventListener("click", openDyModal);
+  $("#moduleHot").addEventListener("click", () => {
+    openDyHotModal();
+    initHotModal();
+  });
+  $("#moduleWeather").addEventListener("click", showWeatherPage);
+  $("#btnBackHome").addEventListener("click", showHomePage);
+
+  // hover 摘要加载（首次 hover 时拉取，之后缓存）
+  setupModuleSummaries();
+}
+
+// ---------------------------------------------------------------------------
+// 首页模块 hover 摘要
+// ---------------------------------------------------------------------------
+
+let _summaryLoaded = {};
+
+async function setupModuleSummaries() {
+  const modules = [
+    { id: "summaryHot", type: "hot" },
+    { id: "summaryXhs", type: "xhs" },
+    { id: "summaryDy", type: "dy" },
+    { id: "summaryWeather", type: "weather" },
+  ];
+  for (const m of modules) {
+    const el = document.getElementById(m.id);
+    if (!el) continue;
+    const card = el.closest(".module-card");
+    card.addEventListener("mouseenter", () => {
+      if (!_summaryLoaded[m.type]) {
+        _summaryLoaded[m.type] = true;
+        loadModuleSummary(m.type, el);
+      }
+    });
+    // 首次加载时预拉取
+    loadModuleSummary(m.type, el);
+    _summaryLoaded[m.type] = true;
+  }
+}
+
+async function loadModuleSummary(type, container) {
+  try {
+    let url = "";
+    if (type === "hot") {
+      url = "/api/hot/calendar";
+    } else if (type === "xhs") {
+      url = "/api/xhs/reports?limit=3";
+    } else if (type === "dy") {
+      url = "/api/dy/reports?limit=3";
+    } else if (type === "weather") {
+      url = "/api/weather/reports?limit=3";
+    }
+    const resp = await fetch(url);
+    const data = await resp.json();
+    renderModuleSummary(type, data, container);
+  } catch (e) {
+    container.innerHTML = '<p class="summary-empty">摘要加载失败</p>';
+  }
+}
+
+function renderModuleSummary(type, data, container) {
+  let title = "";
+  let items = [];
+
+  if (type === "hot") {
+    title = "近期热榜";
+    const dates = (data.dates || []).slice(0, 3);
+    items = dates.map((d) => ({ label: d, sub: "热榜数据" }));
+  } else if (type === "xhs") {
+    title = "近期小红书报告";
+    const reports = (data.reports || []).slice(0, 3);
+    items = reports.map((r) => ({
+      label: r.title || r.keyword || "未命名",
+      sub: (r.created_at || "").slice(0, 10),
+    }));
+  } else if (type === "dy") {
+    title = "近期抖音报告";
+    const reports = (data.reports || []).slice(0, 3);
+    items = reports.map((r) => ({
+      label: r.title || r.keyword || "未命名",
+      sub: (r.created_at || "").slice(0, 10),
+    }));
+  } else if (type === "weather") {
+    title = "近期天气报告";
+    const reports = (data.reports || []).slice(0, 3);
+    items = reports.map((r) => ({
+      label: r.city || r.title || "未命名",
+      sub: (r.created_at || "").slice(0, 10),
+    }));
+  }
+
+  if (items.length === 0) {
+    container.innerHTML = `<p class="summary-title">${title}</p><p class="summary-empty">暂无近期报告</p>`;
+    return;
+  }
+
+  let html = `<p class="summary-title">${title}</p>`;
+  for (const it of items) {
+    html += `<div class="summary-item"><div>${escapeHtml(it.label)}</div><div style="font-size:0.7rem;color:var(--text-muted)">${escapeHtml(it.sub)}</div></div>`;
+  }
+  container.innerHTML = html;
+}
+
+function setupRegionSelector() {
+  document.querySelectorAll(".region-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".region-btn").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      const region = btn.dataset.region;
+      renderProvinceNav(region);
+    });
+  });
+}
+
 async function init() {
   loadFavorites();
   setupSearch();
@@ -962,6 +1109,8 @@ async function init() {
   setupFavoriteControls();
   setupXhsAnalyze();
   setupDyAnalyze();
+  setupHomePage();
+  setupRegionSelector();
   $("#btnAnalyze").addEventListener("click", runAnalysis);
   $("#btnDeepAnalyze").addEventListener("click", runDeepAnalysis);
   $("#btnTempMode").addEventListener("click", () => setMapMode("temp"));
@@ -975,6 +1124,7 @@ async function init() {
   $("#btnMapZoomOut").addEventListener("click", () => setMapScale(mapScale - 0.2));
   $("#btnTempMode")?.addEventListener("click", () => setMapMode("temp"));
   $("#btnRainMode")?.addEventListener("click", () => setMapMode("rain"));
+  $("#btnWeatherReportRefresh")?.addEventListener("click", () => initWeatherReportCalendar());
 
   try {
     await loadCities();
@@ -994,6 +1144,8 @@ async function init() {
   } catch (e) {
     showToast("初始化失败，请确认已启动本地服务");
   }
+
+  showHomePage();
 }
 
 /* —— 小红书内容抓取分析 —— */
@@ -1816,7 +1968,6 @@ function previewXhsReport() {
 }
 
 function setupXhsAnalyze() {
-  $("#btnXhsAnalyze").addEventListener("click", openXhsModal);
   $("#btnXhsClose").addEventListener("click", closeXhsModal);
   $("#xhsModal").addEventListener("click", (e) => {
     if (e.target === $("#xhsModal")) closeXhsModal();
@@ -2338,7 +2489,6 @@ function previewDyReport() {
 }
 
 function setupDyAnalyze() {
-  $("#btnDyAnalyze").addEventListener("click", openDyModal);
   $("#btnDyClose").addEventListener("click", closeDyModal);
   $("#dyModal").addEventListener("click", (e) => {
     if (e.target === $("#dyModal")) closeDyModal();
@@ -2443,10 +2593,6 @@ function renderCalendar(container, opts) {
 let _hotCalYear, _hotCalMonth, _hotSelectedDate, _hotDates = [];
 
 function setupDyHot() {
-  $("#btnDyHot").addEventListener("click", () => {
-    openDyHotModal();
-    initHotModal();
-  });
   $("#btnDyHotClose").addEventListener("click", closeDyHotModal);
   $("#dyHotModal").addEventListener("click", (e) => {
     if (e.target === $("#dyHotModal")) closeDyHotModal();
@@ -2761,6 +2907,102 @@ function renderDyCal() {
       }
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// 天气分析报告日历
+// ---------------------------------------------------------------------------
+
+let _wtrCalYear, _wtrCalMonth, _wtrCalDates = [], _wtrCalSelected = "";
+
+async function initWeatherReportCalendar() {
+  const now = new Date();
+  _wtrCalYear = now.getFullYear();
+  _wtrCalMonth = now.getMonth();
+  await loadWeatherCalDates();
+  await loadWeatherReports();
+}
+
+async function loadWeatherCalDates() {
+  try {
+    const resp = await fetch("/api/weather/reports/calendar");
+    const data = await resp.json();
+    _wtrCalDates = data.dates || [];
+  } catch (e) {
+    _wtrCalDates = [];
+  }
+  renderWeatherCal();
+}
+
+function renderWeatherCal() {
+  const container = $("#weatherCalWrap");
+  if (!container) return;
+  renderCalendar(container, {
+    year: _wtrCalYear,
+    month: _wtrCalMonth,
+    datesWithData: _wtrCalDates,
+    selectedDate: _wtrCalSelected,
+    todayStr: _todayStr(),
+    onNav: (ny, nm) => {
+      _wtrCalYear = ny;
+      _wtrCalMonth = nm;
+      renderWeatherCal();
+    },
+    onSelect: (ds) => {
+      _wtrCalSelected = _wtrCalSelected === ds ? "" : ds;
+      renderWeatherCal();
+      loadWeatherReports(_wtrCalSelected);
+    },
+  });
+}
+
+async function loadWeatherReports(dateFilter) {
+  const list = $("#weatherReportList");
+  if (!list) return;
+  try {
+    let url = "/api/weather/reports?limit=50";
+    if (dateFilter) url += `&date=${encodeURIComponent(dateFilter)}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    const reports = data.reports || [];
+    if (reports.length === 0) {
+      list.innerHTML = '<p style="color:var(--text-muted);font-size:0.82rem;padding:0.5rem 0">暂无天气分析报告</p>';
+      return;
+    }
+    list.innerHTML = reports.map((r) => `
+      <div class="weather-report-item" data-report-id="${escapeHtml(r.id)}">
+        <span class="wr-date">${escapeHtml((r.created_at || "").slice(0, 10))}</span>
+        <span class="wr-city">${escapeHtml(r.city || r.title || "未命名")}</span>
+        <span class="wr-type">${escapeHtml(r.analysis_type === "deep" ? "深度" : "基础")}</span>
+      </div>
+    `).join("");
+    list.querySelectorAll(".weather-report-item").forEach((el) => {
+      el.addEventListener("click", () => {
+        loadWeatherReportDetail(el.dataset.reportId);
+      });
+    });
+  } catch (e) {
+    list.innerHTML = '<p style="color:#c44a2e;font-size:0.82rem">报告加载失败</p>';
+  }
+}
+
+async function loadWeatherReportDetail(reportId) {
+  try {
+    const resp = await fetch(`/api/weather/reports/${reportId}`);
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "加载失败");
+    const html = data.analysis_type === "deep"
+      ? formatDeepAnalysis(data.report_md)
+      : formatBaseAnalysis(data.report_md);
+    $("#aiBody").innerHTML = html;
+    $("#aiBody").classList.remove("hidden");
+    $("#aiDeepBody").classList.add("hidden");
+    $("#aiDeepActions").classList.add("hidden");
+    showToast(`已加载：${data.city || "天气报告"} · ${(data.created_at || "").slice(0, 10)}`);
+    $("#aiBody").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  } catch (e) {
+    showToast(e.message);
+  }
 }
 
 // ---------------------------------------------------------------------------

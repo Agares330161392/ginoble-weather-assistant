@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>基诺浦场景小助手 · 全国城市预报</title>
+  <title>基诺浦场景小助手 · 首页</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -16,7 +16,43 @@
     <span class="orb orb-3"></span>
   </div>
 
-  <div class="app">
+  <!-- ===== 首页 ===== -->
+  <div id="homePage" class="home-page">
+    <header class="home-hero">
+      <h1>基诺浦场景小助手</h1>
+      <p class="home-subtitle">GINOBLE · 分季选款 · 市场洞察 · 气象趋势</p>
+      <div class="home-accent-bar"></div>
+    </header>
+    <div class="module-row">
+      <div class="module-card" id="moduleHot" data-module="hot">
+        <div class="module-icon">🔥</div>
+        <h3>童装童鞋热榜</h3>
+        <p>双平台垂直领域热词追踪</p>
+        <div class="module-summary" id="summaryHot"></div>
+      </div>
+      <div class="module-card" id="moduleXhs" data-module="xhs">
+        <div class="module-icon">📕</div>
+        <h3>小红书内容抓取分析</h3>
+        <p>品类场景洞察 · 竞品舆情深挖</p>
+        <div class="module-summary" id="summaryXhs"></div>
+      </div>
+      <div class="module-card" id="moduleDy" data-module="dy">
+        <div class="module-icon">🎵</div>
+        <h3>抖音内容抓取分析</h3>
+        <p>视频内容分析 · 评论情感挖掘</p>
+        <div class="module-summary" id="summaryDy"></div>
+      </div>
+      <div class="module-card" id="moduleWeather" data-module="weather">
+        <div class="module-icon">🌤️</div>
+        <h3>全国天气趋势</h3>
+        <p>七大地理分区 · 精准气象数据</p>
+        <div class="module-summary" id="summaryWeather"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 天气二级页 ===== -->
+  <div class="app hidden" id="weatherPage">
     <aside class="sidebar">
       <div class="sidebar-fixed">
         <header class="brand">
@@ -44,18 +80,26 @@
         </section>
 
         <button type="button" class="btn-national hidden" id="btnNationalWeather">全国天气</button>
-        <button type="button" class="btn-xhs" id="btnXhsAnalyze">
-          小红书内容抓取分析
-          <span class="xhs-running-dot hidden" id="xhsRunningDot" title="分析进行中"></span>
-        </button>
-        <button type="button" class="btn-xhs" id="btnDyAnalyze">
-          抖音内容抓取分析
-          <span class="xhs-running-dot hidden" id="dyRunningDot" title="分析进行中"></span>
-        </button>
-        <button type="button" class="btn-xhs" id="btnDyHot">
-          童装童鞋双平台热榜
-          <span class="xhs-running-dot hidden" id="dyHotDot" title="加载中"></span>
-        </button>
+
+        <div class="region-selector">
+          <p class="panel-title">地理分区</p>
+          <div class="region-btns">
+            <button type="button" class="region-btn active" data-region="all">全部</button>
+            <button type="button" class="region-btn" data-region="华北">华北</button>
+            <button type="button" class="region-btn" data-region="东北">东北</button>
+            <button type="button" class="region-btn" data-region="华东">华东</button>
+            <button type="button" class="region-btn" data-region="华中">华中</button>
+            <button type="button" class="region-btn" data-region="华南">华南</button>
+            <button type="button" class="region-btn" data-region="西南">西南</button>
+            <button type="button" class="region-btn" data-region="西北">西北</button>
+          </div>
+        </div>
+
+        <button type="button" class="btn-back-home" id="btnBackHome">← 返回首页</button>
+
+        <span class="xhs-running-dot hidden" id="xhsRunningDot" title="小红书分析进行中"></span>
+        <span class="xhs-running-dot hidden" id="dyRunningDot" title="抖音分析进行中"></span>
+        <span class="xhs-running-dot hidden" id="dyHotDot" title="热榜加载中"></span>
       </div>
 
       <div class="sidebar-scroll-wrap">
@@ -137,6 +181,17 @@
             <button type="button" class="btn-secondary" id="btnDeepAnalyze">深度分析</button>
           </div>
           <div class="ai-deep-body hidden" id="aiDeepBody"></div>
+
+          <div class="weather-report-cal">
+            <div class="weather-report-cal-head">
+              <h4>📅 天气分析报告历史</h4>
+              <button type="button" class="btn-secondary btn-sm" id="btnWeatherReportRefresh">刷新</button>
+            </div>
+            <div class="report-cal-container">
+              <div id="weatherCalWrap"></div>
+            </div>
+            <div id="weatherReportList" class="weather-report-list"></div>
+          </div>
         </section>
       </section>
     </main>
