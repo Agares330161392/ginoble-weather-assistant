@@ -1914,3 +1914,124 @@ body {
     max-height: 35vh;
   }
 }
+
+/* ===== 日历组件 ===== */
+.cal-widget {
+  font-size: 0.78rem;
+  user-select: none;
+}
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.cal-title {
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text);
+}
+.cal-nav {
+  border: 1px solid rgba(0,0,0,0.12);
+  background: var(--surface-solid);
+  border-radius: 5px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--muted, #888);
+  font-size: 0.7rem;
+  transition: all 0.15s;
+}
+.cal-nav:hover {
+  background: var(--primary, #4a6cf7);
+  color: #fff;
+  border-color: var(--primary, #4a6cf7);
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+.cal-weekday {
+  text-align: center;
+  font-size: 0.68rem;
+  color: var(--muted, #aaa);
+  padding: 2px 0;
+}
+.cal-day {
+  text-align: center;
+  padding: 4px 0;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.12s;
+  font-size: 0.75rem;
+  color: var(--text);
+  position: relative;
+}
+.cal-day:hover {
+  background: rgba(74, 108, 247, 0.1);
+}
+.cal-day.cal-empty {
+  cursor: default;
+  color: transparent;
+}
+.cal-day.cal-empty:hover {
+  background: none;
+}
+.cal-day.cal-has-data {
+  background: rgba(74, 108, 247, 0.12);
+  color: var(--primary, #4a6cf7);
+  font-weight: 600;
+}
+.cal-day.cal-has-data::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--primary, #4a6cf7);
+}
+.cal-day.cal-today {
+  border: 1px solid var(--primary, #4a6cf7);
+}
+.cal-day.cal-selected {
+  background: var(--primary, #4a6cf7);
+  color: #fff;
+  font-weight: 700;
+}
+.cal-day.cal-selected::after {
+  background: #fff;
+}
+.cal-day.cal-selected:hover {
+  background: var(--primary, #4a6cf7);
+}
+.cal-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  flex-wrap: wrap;
+}
+
+/* ===== 日历容器 ===== */
+.report-cal-container {
+  margin: 8px 0;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.hot-calendar-container {
+  margin: 0 24px 8px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}

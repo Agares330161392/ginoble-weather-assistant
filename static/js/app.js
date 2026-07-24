@@ -1221,6 +1221,7 @@ function switchXhsPane(pane) {
   $("#xhsHistoryBody").classList.toggle("hidden", !isHistory);
   if (isHistory) {
     loadXhsHistory().catch((err) => showToast(err.message));
+    initXhsReportCalendar();
   }
 }
 
@@ -1491,6 +1492,50 @@ async function loadXhsHistory() {
       </article>`;
     })
     .join("");
+}
+
+async function loadXhsHistoryByDate(dateStr) {
+  const box = $("#xhsHistoryList");
+  if (!dateStr) {
+    return loadXhsHistory().catch((err) => showToast(err.message));
+  }
+  box.innerHTML = `<div class="ai-loading"><div class="spinner"></div>加载 ${dateStr} 的报告…</div>`;
+  try {
+    const resp = await fetch("/api/xhs/reports?limit=500");
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "加载失败");
+    const reports = (data.reports || []).filter((r) =>
+      (r.created_at || "").startsWith(dateStr)
+    );
+    if (!reports.length) {
+      box.innerHTML = `<p class="ai-placeholder">${dateStr} 暂无报告</p>`;
+      return;
+    }
+    box.innerHTML = reports
+      .map((r) => {
+        const sub = [
+          r.created_at || "",
+          r.analysis_type_name || "",
+          r.keyword ? `关键词「${r.keyword}」` : "",
+          r.sample_count ? `${r.sample_count} 条样本` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<article class="xhs-history-item" data-id="${escapeHtml(r.id)}">
+          <div class="xhs-history-main">
+            <h4>${escapeHtml(r.title || r.keyword || r.id)}</h4>
+            <p>${escapeHtml(sub)}</p>
+          </div>
+          <div class="xhs-history-item-actions">
+            <button type="button" class="btn-secondary btn-sm" data-action="open">查看</button>
+            <button type="button" class="btn-secondary btn-sm danger" data-action="delete">删除</button>
+          </div>
+        </article>`;
+      })
+      .join("");
+  } catch (err) {
+    box.innerHTML = `<p class="ai-placeholder" style="color:#c44a2e">${escapeHtml(err.message)}</p>`;
+  }
 }
 
 async function openXhsHistoryReport(reportId) {
@@ -1797,6 +1842,7 @@ function setupXhsAnalyze() {
   $("#btnXhsTabHistory").addEventListener("click", () => switchXhsPane("history"));
   $("#btnXhsRefreshHistory").addEventListener("click", () => {
     loadXhsHistory().catch((err) => showToast(err.message));
+    loadXhsCalDates();
   });
   $("#xhsHistoryList").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-action]");
@@ -1928,6 +1974,7 @@ function switchDyPane(pane) {
   $("#dyHistoryBody").classList.toggle("hidden", !isHistory);
   if (isHistory) {
     loadDyHistory().catch((err) => showToast(err.message));
+    initDyReportCalendar();
   }
 }
 
@@ -1994,6 +2041,50 @@ async function loadDyHistory() {
       </article>`;
     })
     .join("");
+}
+
+async function loadDyHistoryByDate(dateStr) {
+  const box = $("#dyHistoryList");
+  if (!dateStr) {
+    return loadDyHistory().catch((err) => showToast(err.message));
+  }
+  box.innerHTML = `<div class="ai-loading"><div class="spinner"></div>加载 ${dateStr} 的报告…</div>`;
+  try {
+    const resp = await fetch("/api/dy/reports?limit=500");
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || "加载失败");
+    const reports = (data.reports || []).filter((r) =>
+      (r.created_at || "").startsWith(dateStr)
+    );
+    if (!reports.length) {
+      box.innerHTML = `<p class="ai-placeholder">${dateStr} 暂无报告</p>`;
+      return;
+    }
+    box.innerHTML = reports
+      .map((r) => {
+        const sub = [
+          r.created_at || "",
+          r.analysis_type_name || "",
+          r.keyword ? `关键词「${r.keyword}」` : "",
+          r.sample_count ? `${r.sample_count} 条样本` : "",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return `<article class="xhs-history-item" data-id="${escapeHtml(r.id)}">
+          <div class="xhs-history-main">
+            <h4>${escapeHtml(r.title || r.keyword || r.id)}</h4>
+            <p>${escapeHtml(sub)}</p>
+          </div>
+          <div class="xhs-history-item-actions">
+            <button type="button" class="btn-secondary btn-sm" data-action="open">查看</button>
+            <button type="button" class="btn-secondary btn-sm danger" data-action="delete">删除</button>
+          </div>
+        </article>`;
+      })
+      .join("");
+  } catch (err) {
+    box.innerHTML = `<p class="ai-placeholder" style="color:#c44a2e">${escapeHtml(err.message)}</p>`;
+  }
 }
 
 async function openDyHistoryReport(reportId) {
@@ -2270,6 +2361,7 @@ function setupDyAnalyze() {
   $("#btnDyTabHistory").addEventListener("click", () => switchDyPane("history"));
   $("#btnDyRefreshHistory").addEventListener("click", () => {
     loadDyHistory().catch((err) => showToast(err.message));
+    loadDyCalDates();
   });
   $("#dyHistoryList").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-action]");
@@ -2288,20 +2380,79 @@ function setupDyAnalyze() {
 }
 
 // ---------------------------------------------------------------------------
-// 童装童鞋双平台热榜（抖音 + 小红书）
+// 可复用日历组件
 // ---------------------------------------------------------------------------
+
+const CAL_WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+function renderCalendar(container, opts) {
+  const {
+    year, month, datesWithData, selectedDate, todayStr,
+    onSelect,
+  } = opts;
+  const dateSet = new Set(datesWithData || []);
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = lastDay.getDate();
+
+  let html = `<div class="cal-widget">`;
+  html += `<div class="cal-header">`;
+  html += `<span class="cal-nav" data-cal-nav="prev">‹</span>`;
+  html += `<span class="cal-title">${year}年${month + 1}月</span>`;
+  html += `<span class="cal-nav" data-cal-nav="next">›</span>`;
+  html += `</div>`;
+  html += `<div class="cal-grid">`;
+  for (const wd of CAL_WEEKDAYS) {
+    html += `<div class="cal-weekday">${wd}</div>`;
+  }
+  for (let i = 0; i < startWeekday; i++) {
+    html += `<div class="cal-day cal-empty"></div>`;
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    const classes = ["cal-day"];
+    if (dateSet.has(ds)) classes.push("cal-has-data");
+    if (ds === todayStr) classes.push("cal-today");
+    if (ds === selectedDate) classes.push("cal-selected");
+    html += `<div class="${classes.join(" ")}" data-cal-date="${ds}">${d}</div>`;
+  }
+  html += `</div></div>`;
+  container.innerHTML = html;
+
+  container.querySelectorAll("[data-cal-nav]").forEach((el) => {
+    el.addEventListener("click", () => {
+      const dir = el.dataset.calNav === "prev" ? -1 : 1;
+      let ny = year, nm = month + dir;
+      if (nm < 0) { nm = 11; ny--; }
+      if (nm > 11) { nm = 0; ny++; }
+      opts.onNav(ny, nm);
+    });
+  });
+  container.querySelectorAll(".cal-day[data-cal-date]").forEach((el) => {
+    el.addEventListener("click", () => {
+      opts.onSelect(el.dataset.calDate);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 童装童鞋双平台热榜（日历 + 缓存）
+// ---------------------------------------------------------------------------
+
+let _hotCalYear, _hotCalMonth, _hotSelectedDate, _hotDates = [];
 
 function setupDyHot() {
   $("#btnDyHot").addEventListener("click", () => {
     openDyHotModal();
-    loadBothHotLists();
+    initHotModal();
   });
   $("#btnDyHotClose").addEventListener("click", closeDyHotModal);
   $("#dyHotModal").addEventListener("click", (e) => {
     if (e.target === $("#dyHotModal")) closeDyHotModal();
   });
   $("#btnDyHotRefresh").addEventListener("click", () => {
-    loadBothHotLists();
+    loadHotToday(true);
   });
 }
 
@@ -2313,118 +2464,308 @@ function closeDyHotModal() {
   $("#dyHotModal").classList.add("hidden");
 }
 
-function loadBothHotLists() {
-  // 同时发起抖音和小红书请求
-  loadDyHotList();
-  loadXhsHotList();
+function _todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-async function loadDyHotList() {
-  const body = $("#dyHotBody");
-  const status = $("#dyHotStatus");
+async function initHotModal() {
+  const today = _todayStr();
+  _hotSelectedDate = today;
+  const now = new Date();
+  _hotCalYear = now.getFullYear();
+  _hotCalMonth = now.getMonth();
+  await loadHotCalendar();
+  await loadHotToday(false);
+}
+
+async function loadHotCalendar() {
+  try {
+    const resp = await fetch("/api/hot/calendar");
+    const data = await resp.json();
+    _hotDates = data.dates || [];
+  } catch (e) {
+    _hotDates = [];
+  }
+  renderHotCalendar();
+}
+
+function renderHotCalendar() {
+  const container = $("#hotCalendarWrap");
+  if (!container) return;
+  renderCalendar(container, {
+    year: _hotCalYear,
+    month: _hotCalMonth,
+    datesWithData: _hotDates,
+    selectedDate: _hotSelectedDate,
+    todayStr: _todayStr(),
+    onNav: (ny, nm) => {
+      _hotCalYear = ny;
+      _hotCalMonth = nm;
+      renderHotCalendar();
+    },
+    onSelect: (ds) => {
+      _hotSelectedDate = ds;
+      renderHotCalendar();
+      loadHotByDate(ds);
+    },
+  });
+}
+
+async function loadHotToday(force) {
+  const dyBody = $("#dyHotBody");
+  const xhsBody = $("#xhsHotBody");
+  const dyStatus = $("#dyHotStatus");
+  const xhsStatus = $("#xhsHotStatus");
   const dot = $("#dyHotDot");
   const btn = $("#btnDyHotRefresh");
+  const meta = $("#dyHotMeta");
 
-  body.innerHTML = `<p class="ai-placeholder">搜索中…约 15-30 秒</p>`;
-  status.textContent = "加载中…";
+  if (force) {
+    dyBody.innerHTML = `<p class="ai-placeholder">正在重新搜索…约 15-30 秒</p>`;
+    xhsBody.innerHTML = `<p class="ai-placeholder">正在重新搜索…约 15-30 秒</p>`;
+  } else {
+    dyBody.innerHTML = `<p class="ai-placeholder">加载中…</p>`;
+    xhsBody.innerHTML = `<p class="ai-placeholder">加载中…</p>`;
+  }
+  dyStatus.textContent = "加载中…";
+  xhsStatus.textContent = "加载中…";
   dot.classList.remove("hidden");
   btn.disabled = true;
   btn.textContent = "加载中…";
 
   try {
-    const resp = await fetch("/api/dy/hot?top_n=20");
+    const url = `/api/hot/today${force ? "?force=1" : ""}`;
+    const resp = await fetch(url);
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error || "加载失败");
 
-    const items = data.items || [];
-    if (items.length === 0) {
-      body.innerHTML = `<p class="ai-placeholder">暂无数据</p>`;
-      status.textContent = "无数据";
-      return;
+    _hotSelectedDate = data.date || _todayStr();
+    const isCached = data.cached;
+    const createdAt = data.created_at || "";
+    meta.textContent = `${data.date} · ${isCached ? "缓存数据" : "新拉取"} · ${createdAt}`;
+
+    renderHotDyItems(data.dy || []);
+    renderHotXhsItems(data.xhs || []);
+
+    // 刷新日历标记
+    if (!isCached) {
+      await loadHotCalendar();
     }
-
-    status.textContent = `${items.length} 条`;
-
-    body.innerHTML = items.map((item) => {
-      const rankClass = item.rank <= 3 ? "dy-hot-rank-top" : "";
-      const rankBadge = item.rank <= 3 ? ["🥇", "🥈", "🥉"][item.rank - 1] : item.rank;
-      const hotStr = formatNum(item.hot_score);
-      return `
-        <div class="dy-hot-item ${rankClass}">
-          <span class="dy-hot-rank">${rankBadge}</span>
-          <div class="dy-hot-content">
-            <p class="dy-hot-title">${escapeHtml(item.title || "(无标题)")}</p>
-            <div class="dy-hot-stats">
-              <span class="dy-hot-author">@${escapeHtml(item.author || "未知")}</span>
-              <span>赞 ${formatNum(item.liked)}</span>
-              <span>评 ${formatNum(item.commented)}</span>
-              <span class="dy-hot-score">🔥 ${hotStr}</span>
-              <span class="dy-hot-kw">${escapeHtml(item.source_keyword || "")}</span>
-            </div>
-          </div>
-          <a class="dy-hot-link" href="https://www.douyin.com/video/${item.aweme_id}" target="_blank" rel="noopener">查看</a>
-        </div>`;
-    }).join("");
+    renderHotCalendar();
   } catch (err) {
-    body.innerHTML = `<p class="ai-placeholder" style="color:#e74c3c;">${escapeHtml(err.message)}</p>`;
-    status.textContent = "失败";
+    dyBody.innerHTML = `<p class="ai-placeholder" style="color:#e74c3c;">${escapeHtml(err.message)}</p>`;
+    xhsBody.innerHTML = `<p class="ai-placeholder" style="color:#e74c3c;">${escapeHtml(err.message)}</p>`;
+    dyStatus.textContent = "失败";
+    xhsStatus.textContent = "失败";
   } finally {
     dot.classList.add("hidden");
     btn.disabled = false;
-    btn.textContent = "刷新";
+    btn.textContent = "刷新今日";
   }
 }
 
-async function loadXhsHotList() {
-  const body = $("#xhsHotBody");
-  const status = $("#xhsHotStatus");
+async function loadHotByDate(dateStr) {
+  const dyBody = $("#dyHotBody");
+  const xhsBody = $("#xhsHotBody");
+  const dyStatus = $("#dyHotStatus");
+  const xhsStatus = $("#xhsHotStatus");
+  const meta = $("#dyHotMeta");
+  const btn = $("#btnDyHotRefresh");
 
-  body.innerHTML = `<p class="ai-placeholder">搜索中…约 15-30 秒</p>`;
-  status.textContent = "加载中…";
+  dyBody.innerHTML = `<p class="ai-placeholder">加载中…</p>`;
+  xhsBody.innerHTML = `<p class="ai-placeholder">加载中…</p>`;
+  dyStatus.textContent = "…";
+  xhsStatus.textContent = "…";
+  btn.disabled = true;
 
   try {
-    const resp = await fetch("/api/xhs/hot?top_n=20");
+    const resp = await fetch(`/api/hot/date?date=${dateStr}`);
     const data = await resp.json();
-    if (!resp.ok) throw new Error(data.error || "加载失败");
+    if (!resp.ok) throw new Error(data.error || "无数据");
 
-    const items = data.items || [];
-    if (items.length === 0) {
-      body.innerHTML = `<p class="ai-placeholder">暂无数据</p>`;
-      status.textContent = "无数据";
-      return;
-    }
-
-    status.textContent = `${items.length} 条`;
-
-    body.innerHTML = items.map((item) => {
-      const rankClass = item.rank <= 3 ? "dy-hot-rank-top" : "";
-      const rankBadge = item.rank <= 3 ? ["🥇", "🥈", "🥉"][item.rank - 1] : item.rank;
-      const hotStr = formatNum(item.hot_score);
-      const noteUrl = item.note_id
-        ? `https://www.xiaohongshu.com/explore/${item.note_id}`
-        : "#";
-      return `
-        <div class="dy-hot-item ${rankClass}">
-          <span class="dy-hot-rank">${rankBadge}</span>
-          <div class="dy-hot-content">
-            <p class="dy-hot-title">${escapeHtml(item.title || "(无标题)")}</p>
-            <div class="dy-hot-stats">
-              <span class="dy-hot-author">@${escapeHtml(item.author || "未知")}</span>
-              <span>赞 ${formatNum(item.liked)}</span>
-              <span>藏 ${formatNum(item.collected)}</span>
-              <span>评 ${formatNum(item.commented)}</span>
-              <span class="dy-hot-score">🔥 ${hotStr}</span>
-              <span class="dy-hot-kw">${escapeHtml(item.source_keyword || "")}</span>
-            </div>
-          </div>
-          <a class="dy-hot-link" href="${noteUrl}" target="_blank" rel="noopener">查看</a>
-        </div>`;
-    }).join("");
+    meta.textContent = `${data.date} · 缓存数据 · ${data.created_at || ""}`;
+    renderHotDyItems(data.dy || []);
+    renderHotXhsItems(data.xhs || []);
   } catch (err) {
-    body.innerHTML = `<p class="ai-placeholder" style="color:#e74c3c;">${escapeHtml(err.message)}</p>`;
-    status.textContent = "失败";
+    dyBody.innerHTML = `<p class="ai-placeholder" style="color:#e74c3c;">${escapeHtml(err.message)}</p>`;
+    xhsBody.innerHTML = `<p class="ai-placeholder" style="color:#e74c3c;">${escapeHtml(err.message)}</p>`;
+    dyStatus.textContent = "无";
+    xhsStatus.textContent = "无";
+  } finally {
+    btn.disabled = false;
   }
 }
+
+function renderHotDyItems(items) {
+  const body = $("#dyHotBody");
+  const status = $("#dyHotStatus");
+  if (!items.length) {
+    body.innerHTML = `<p class="ai-placeholder">暂无数据</p>`;
+    status.textContent = "无";
+    return;
+  }
+  status.textContent = `${items.length} 条`;
+  body.innerHTML = items.map((item) => {
+    const rankClass = item.rank <= 3 ? "dy-hot-rank-top" : "";
+    const rankBadge = item.rank <= 3 ? ["🥇", "🥈", "🥉"][item.rank - 1] : item.rank;
+    const hotStr = formatNum(item.hot_score);
+    return `
+      <div class="dy-hot-item ${rankClass}">
+        <span class="dy-hot-rank">${rankBadge}</span>
+        <div class="dy-hot-content">
+          <p class="dy-hot-title">${escapeHtml(item.title || "(无标题)")}</p>
+          <div class="dy-hot-stats">
+            <span class="dy-hot-author">@${escapeHtml(item.author || "未知")}</span>
+            <span>赞 ${formatNum(item.liked)}</span>
+            <span>评 ${formatNum(item.commented)}</span>
+            <span class="dy-hot-score">🔥 ${hotStr}</span>
+            <span class="dy-hot-kw">${escapeHtml(item.source_keyword || "")}</span>
+          </div>
+        </div>
+        <a class="dy-hot-link" href="https://www.douyin.com/video/${item.aweme_id}" target="_blank" rel="noopener">查看</a>
+      </div>`;
+  }).join("");
+}
+
+function renderHotXhsItems(items) {
+  const body = $("#xhsHotBody");
+  const status = $("#xhsHotStatus");
+  if (!items.length) {
+    body.innerHTML = `<p class="ai-placeholder">暂无数据</p>`;
+    status.textContent = "无";
+    return;
+  }
+  status.textContent = `${items.length} 条`;
+  body.innerHTML = items.map((item) => {
+    const rankClass = item.rank <= 3 ? "dy-hot-rank-top" : "";
+    const rankBadge = item.rank <= 3 ? ["🥇", "🥈", "🥉"][item.rank - 1] : item.rank;
+    const hotStr = formatNum(item.hot_score);
+    const noteUrl = item.note_id
+      ? `https://www.xiaohongshu.com/explore/${item.note_id}`
+      : "#";
+    return `
+      <div class="dy-hot-item ${rankClass}">
+        <span class="dy-hot-rank">${rankBadge}</span>
+        <div class="dy-hot-content">
+          <p class="dy-hot-title">${escapeHtml(item.title || "(无标题)")}</p>
+          <div class="dy-hot-stats">
+            <span class="dy-hot-author">@${escapeHtml(item.author || "未知")}</span>
+            <span>赞 ${formatNum(item.liked)}</span>
+            <span>藏 ${formatNum(item.collected)}</span>
+            <span>评 ${formatNum(item.commented)}</span>
+            <span class="dy-hot-score">🔥 ${hotStr}</span>
+            <span class="dy-hot-kw">${escapeHtml(item.source_keyword || "")}</span>
+          </div>
+        </div>
+        <a class="dy-hot-link" href="${noteUrl}" target="_blank" rel="noopener">查看</a>
+      </div>`;
+  }).join("");
+}
+
+// ---------------------------------------------------------------------------
+// 小红书报告日历
+// ---------------------------------------------------------------------------
+
+let _xhsCalYear, _xhsCalMonth, _xhsCalDates = [], _xhsCalSelected = "";
+
+async function initXhsReportCalendar() {
+  const now = new Date();
+  _xhsCalYear = now.getFullYear();
+  _xhsCalMonth = now.getMonth();
+  await loadXhsCalDates();
+}
+
+async function loadXhsCalDates() {
+  try {
+    const resp = await fetch("/api/xhs/reports/calendar");
+    const data = await resp.json();
+    _xhsCalDates = data.dates || [];
+  } catch (e) {
+    _xhsCalDates = [];
+  }
+  renderXhsCal();
+}
+
+function renderXhsCal() {
+  const container = $("#xhsCalWrap");
+  if (!container) return;
+  renderCalendar(container, {
+    year: _xhsCalYear,
+    month: _xhsCalMonth,
+    datesWithData: _xhsCalDates,
+    selectedDate: _xhsCalSelected,
+    todayStr: _todayStr(),
+    onNav: (ny, nm) => {
+      _xhsCalYear = ny;
+      _xhsCalMonth = nm;
+      renderXhsCal();
+    },
+    onSelect: (ds) => {
+      _xhsCalSelected = _xhsCalSelected === ds ? "" : ds;
+      renderXhsCal();
+      if (_xhsCalSelected) {
+        loadXhsHistoryByDate(_xhsCalSelected);
+      } else {
+        loadXhsHistory().catch((err) => showToast(err.message));
+      }
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 抖音报告日历
+// ---------------------------------------------------------------------------
+
+let _dyCalYear, _dyCalMonth, _dyCalDates = [], _dyCalSelected = "";
+
+async function initDyReportCalendar() {
+  const now = new Date();
+  _dyCalYear = now.getFullYear();
+  _dyCalMonth = now.getMonth();
+  await loadDyCalDates();
+}
+
+async function loadDyCalDates() {
+  try {
+    const resp = await fetch("/api/dy/reports/calendar");
+    const data = await resp.json();
+    _dyCalDates = data.dates || [];
+  } catch (e) {
+    _dyCalDates = [];
+  }
+  renderDyCal();
+}
+
+function renderDyCal() {
+  const container = $("#dyCalWrap");
+  if (!container) return;
+  renderCalendar(container, {
+    year: _dyCalYear,
+    month: _dyCalMonth,
+    datesWithData: _dyCalDates,
+    selectedDate: _dyCalSelected,
+    todayStr: _todayStr(),
+    onNav: (ny, nm) => {
+      _dyCalYear = ny;
+      _dyCalMonth = nm;
+      renderDyCal();
+    },
+    onSelect: (ds) => {
+      _dyCalSelected = _dyCalSelected === ds ? "" : ds;
+      renderDyCal();
+      if (_dyCalSelected) {
+        loadDyHistoryByDate(_dyCalSelected);
+      } else {
+        loadDyHistory().catch((err) => showToast(err.message));
+      }
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// 工具函数
+// ---------------------------------------------------------------------------
 
 function formatNum(n) {
   n = parseInt(n, 10) || 0;

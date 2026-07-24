@@ -20,6 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent
 KEY_ENV_CANDIDATES = [BASE_DIR / "key.env", BASE_DIR.parent / "key.env"]
 BRAND_FILE_CANDIDATES = [BASE_DIR / "ginoble_brand.txt", BASE_DIR.parent / "ginoble_brand.txt"]
 SERVER_PORT = 5000
+HOT_CACHE_DIR = BASE_DIR / "hot_cache"
 
 app = Flask(__name__, static_folder="static")
 CORS(app)
@@ -954,6 +955,178 @@ def xhs_hot_list():
         return jsonify({"items": result, "count": len(result)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# 热搜日历 + 缓存系统
+# ---------------------------------------------------------------------------
+
+import json as _json_module
+import datetime as _dt
+
+
+def _hot_cache_path(date_str: str) -> Path:
+    return HOT_CACHE_DIR / f"{date_str}.json"
+
+
+def _hot_today_str() -> str:
+    return _dt.date.today().strftime("%Y-%m-%d")
+
+
+def _hot_save_cache(dy_items: list, xhs_items: list) -> str:
+    HOT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    date_str = _hot_today_str()
+    cache = {
+        "date": date_str,
+        "created_at": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "dy": dy_items,
+        "xhs": xhs_items,
+    }
+    _hot_cache_path(date_str).write_text(
+        _json_module.dumps(cache, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return date_str
+
+
+def _hot_load_cache(date_str: str) -> dict | None:
+    p = _hot_cache_path(date_str)
+    if not p.is_file():
+        return None
+    try:
+        return _json_module.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+@app.route("/api/hot/today", methods=["GET"])
+def hot_today():
+    """获取今日热榜（有缓存则直接返回，避免重复拉取）。
+
+    ?force=1 时强制重新拉取。
+    """
+    force = request.args.get("force", "0") == "1"
+    date_str = _hot_today_str()
+
+    if not force:
+        cached = _hot_load_cache(date_str)
+        if cached:
+            return jsonify({"cached": True, **cached})
+
+    # 需要拉取
+    tikhub_key = load_tikhub_api_key()
+    xhs_key = load_xhs_api_key()
+    errors = []
+    dy_items = []
+    xhs_items = []
+
+    if tikhub_key:
+        try:
+            raw = dy_service.fetch_kids_hot_list(api_key=tikhub_key, top_n=20)
+            dy_items = [{
+                "rank": i + 1,
+                "aweme_id": v.get("aweme_id"),
+                "title": v.get("title"),
+                "author": v.get("author"),
+                "liked": v.get("liked", 0),
+                "commented": v.get("commented", 0),
+                "hot_score": v.get("hot_score", 0),
+                "source_keyword": v.get("source_keyword"),
+            } for i, v in enumerate(raw)]
+        except Exception as e:
+            errors.append(f"抖音: {e}")
+
+    if xhs_key:
+        try:
+            raw = xhs_service.fetch_kids_hot_list(api_key=xhs_key, top_n=20)
+            xhs_items = [{
+                "rank": i + 1,
+                "note_id": n.get("note_id"),
+                "xsec_token": n.get("xsec_token", ""),
+                "title": n.get("title"),
+                "author": n.get("author"),
+                "liked": n.get("liked", 0),
+                "collected": n.get("collected", 0),
+                "commented": n.get("commented", 0),
+                "hot_score": n.get("hot_score", 0),
+                "source_keyword": n.get("source_keyword"),
+            } for i, n in enumerate(raw)]
+        except Exception as e:
+            errors.append(f"小红书: {e}")
+
+    _hot_save_cache(dy_items, xhs_items)
+    return jsonify({
+        "cached": False,
+        "date": date_str,
+        "created_at": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "dy": dy_items,
+        "xhs": xhs_items,
+        "errors": errors if errors else None,
+    })
+
+
+@app.route("/api/hot/calendar", methods=["GET"])
+def hot_calendar():
+    """返回有缓存数据的日期列表。"""
+    HOT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    dates = []
+    for p in HOT_CACHE_DIR.glob("*.json"):
+        date_str = p.stem
+        try:
+            _dt.date.fromisoformat(date_str)
+            dates.append(date_str)
+        except ValueError:
+            continue
+    dates.sort(reverse=True)
+    return jsonify({"dates": dates})
+
+
+@app.route("/api/hot/date", methods=["GET"])
+def hot_by_date():
+    """获取指定日期的缓存热榜。"""
+    date_str = request.args.get("date", "")
+    if not date_str:
+        return jsonify({"error": "缺少 date 参数"}), 400
+    cached = _hot_load_cache(date_str)
+    if not cached:
+        return jsonify({"error": "该日期无缓存数据"}), 404
+    return jsonify(cached)
+
+
+# ---------------------------------------------------------------------------
+# 报告日历 API（小红书 + 抖音）
+# ---------------------------------------------------------------------------
+
+@app.route("/api/xhs/reports/calendar", methods=["GET"])
+def xhs_reports_calendar():
+    """返回小红书报告存在的日期列表。"""
+    try:
+        limit = int(request.args.get("limit", 500))
+    except (TypeError, ValueError):
+        limit = 500
+    reports = xhs_service.list_reports(limit=limit)
+    dates = set()
+    for r in reports:
+        created = r.get("created_at", "")
+        if created and len(created) >= 10:
+            dates.add(created[:10])
+    return jsonify({"dates": sorted(dates, reverse=True)})
+
+
+@app.route("/api/dy/reports/calendar", methods=["GET"])
+def dy_reports_calendar():
+    """返回抖音报告存在的日期列表。"""
+    try:
+        limit = int(request.args.get("limit", 500))
+    except (TypeError, ValueError):
+        limit = 500
+    reports = dy_service.list_reports(limit=limit)
+    dates = set()
+    for r in reports:
+        created = r.get("created_at", "")
+        if created and len(created) >= 10:
+            dates.add(created[:10])
+    return jsonify({"dates": sorted(dates, reverse=True)})
 
 
 if __name__ == "__main__":
