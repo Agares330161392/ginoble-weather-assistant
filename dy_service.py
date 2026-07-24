@@ -183,7 +183,7 @@ def resolve_analysis_type(raw: str) -> tuple[str, str]:
 
 def selection_fields(data: dict) -> dict:
     fetch_count = int(data.get("fetch_count") or 20)
-    fetch_count = max(1, min(fetch_count, 50))
+    fetch_count = max(1, min(fetch_count, 200))
     analysis_raw = (data.get("analysis_type") or "category_scene").strip()
     return {
         "preset_id": data.get("preset_id") or "",
@@ -332,7 +332,7 @@ def search_videos(
     offset = 0
     page = 0
 
-    while len(collected) < fetch_count and page < 10:
+    while len(collected) < fetch_count and page < 30:
         payload = {
             "keyword": keyword,
             "count": min(fetch_count - len(collected), 20),

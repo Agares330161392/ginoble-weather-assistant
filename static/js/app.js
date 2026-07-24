@@ -1846,7 +1846,7 @@ function dyAnalysisTypeToStore(display) {
 }
 
 function getDyFormValues() {
-  const fetchCount = Math.max(1, Math.min(50, parseInt($("#dyFetchCount").value, 10) || 20));
+  const fetchCount = Math.max(1, Math.min(200, parseInt($("#dyFetchCount").value, 10) || 20));
   return {
     preset_id: $("#dyPresetSelect").value || "",
     analysis_type: dyAnalysisTypeToStore($("#dyAnalysisType").value),
