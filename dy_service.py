@@ -320,22 +320,23 @@ def search_videos(
     sort_type: str = "general",
     note_time: str = "一周内",
 ) -> list[dict]:
-    """搜索抖音视频，返回标准化后的视频列表。"""
+    """搜索抖音视频，返回标准化后的视频列表。
+
+    使用 TikHub fetch_video_search_v2 接口，POST JSON body。
+    参数: keyword, count, offset。
+    响应结构: data.business_data 数组，type==1 为视频，data.aweme_info 含视频详情。
+    翻页: data.business_config.has_more + data.business_config.next_page.cursor。
+    """
     collected: list[dict] = []
     seen: set[str] = set()
     offset = 0
-    page_size = min(fetch_count, 20)
+    page = 0
 
-    sort_val = SORT_TYPE_MAP.get(sort_type, 0)
-    publish_time = NOTE_TIME_MAP.get(note_time, 7)
-
-    while len(collected) < fetch_count and offset < 200:
+    while len(collected) < fetch_count and page < 10:
         payload = {
             "keyword": keyword,
-            "count": page_size,
+            "count": min(fetch_count - len(collected), 20),
             "offset": offset,
-            "sort_type": sort_val,
-            "publish_time": publish_time,
         }
         try:
             resp = requests.post(
@@ -353,12 +354,20 @@ def search_videos(
         if not isinstance(inner, dict):
             break
 
-        items = _dig(inner, "data", default=[]) or _dig(inner, "aweme_list", default=[]) or _dig(inner, "list", default=[])
-        if not items:
+        # v2 返回数据在 business_data 数组中，type==1 为视频条目
+        business_data = _dig(inner, "business_data", default=[])
+        if not business_data:
             break
 
-        for raw in items:
-            norm = normalize_search_item(raw)
+        items_found = 0
+        for raw in business_data:
+            if not isinstance(raw, dict) or raw.get("type") != 1:
+                continue
+            aweme_info = _dig(raw, "data", "aweme_info")
+            if not aweme_info:
+                continue
+            items_found += 1
+            norm = normalize_search_item(aweme_info)
             if not norm or norm["aweme_id"] in seen:
                 continue
             seen.add(norm["aweme_id"])
@@ -366,20 +375,39 @@ def search_videos(
             if len(collected) >= fetch_count:
                 break
 
-        has_more = _dig(inner, "has_more")
-        if has_more is False or len(items) < page_size:
+        # 翻页: 使用 business_config.next_page.cursor 作为下一页 offset
+        business_config = _dig(inner, "business_config", default={})
+        has_more = _dig(business_config, "has_more", default=0)
+        next_page = _dig(business_config, "next_page", default={})
+        next_cursor = _dig(next_page, "cursor")
+        if next_cursor is not None:
+            offset = next_cursor
+        else:
+            offset += len(business_data)
+
+        if has_more != 1 or items_found == 0:
             break
-        offset += page_size
+        page += 1
         time.sleep(0.15)
 
     return collected[:fetch_count]
 
 
 def normalize_search_item(item: dict) -> dict | None:
-    """标准化搜索结果中的视频条目。"""
+    """标准化搜索结果中的视频条目。
+
+    item 可以是:
+    - aweme_info 本体（直接含 aweme_id / author / statistics）
+    - 外层包装（含 aweme_info 或 awemeInfo 键）
+    注意: aweme_info 内部也有 video 键（播放信息），不可用 item.get("video") 匹配。
+    """
     if not isinstance(item, dict):
         return None
-    aweme = item.get("aweme_info") or item.get("awemeInfo") or item.get("video") or item
+    # 若 item 自身已含 aweme_id，说明传入的就是 aweme 本体，直接使用
+    if item.get("aweme_id"):
+        aweme = item
+    else:
+        aweme = item.get("aweme_info") or item.get("awemeInfo") or item
     if not isinstance(aweme, dict):
         return None
     aweme_id = (
