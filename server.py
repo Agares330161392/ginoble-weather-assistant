@@ -400,7 +400,8 @@ def analyze():
             "analysis_type": "deep" if deep else "base",
             "weather_summary": weather_text,
         })
-        return jsonify({"analysis": analysis, "weather_summary": weather_text, "report_id": saved.get("id")})
+        report_id = saved.get("id") if saved else None
+        return jsonify({"analysis": analysis, "weather_summary": weather_text, "report_id": report_id})
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 500
     except requests.RequestException as e:
@@ -1170,6 +1171,7 @@ def _wtr_save_report(report_md: str, meta: dict) -> dict:
         meta_path.write_text(_json_module.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
         print(f"[wtr] save report failed: {e}")
+        return None
     return record
 
 

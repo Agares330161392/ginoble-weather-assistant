@@ -44,6 +44,7 @@ let currentDays = 7;
 let weatherCache = { 7: null, 16: null };
 let provinceWeatherMap = {};
 let chinaSvgLoaded = false;
+let _weatherDataReady = false;
 let mapScale = 1;
 let mapMode = "temp";
 
@@ -262,7 +263,6 @@ async function loadCities() {
   renderProvinceNav();
   renderFavorites();
   await loadProvinceWeatherOverview();
-  renderChinaMap();
   const stats = $("#cityStats");
   if (stats) {
     stats.textContent = `已收录 ${flatCities.length} 个城市 · 常用 ${favorites.length} 个`;
@@ -350,8 +350,13 @@ async function loadProvinceWeatherOverview() {
   results.forEach((r) => {
     if (r.status === "fulfilled") provinceWeatherMap[r.value.province] = r.value;
   });
+  _weatherDataReady = true;
   renderChinaMap();
   updateMapSummary();
+  // 数据加载完成后，应用当前选中的区域（解决点击时数据未加载的问题）
+  if (_activeRegion && _activeRegion !== "all") {
+    updateRegionSummary(_activeRegion);
+  }
 }
 
 function updateActiveChip() {
@@ -432,9 +437,57 @@ function updateMapSummary() {
   styleChinaSvgMap();
 }
 
+function updateRegionSummary(region) {
+  const statTemp = $("#mapStatTemp");
+  const statRain = $("#mapStatRain");
+  const statTrend = $("#mapStatTrend");
+  if (!statTemp) return;
+
+  if (!region || region === "all") {
+    updateMapSummary();
+    return;
+  }
+
+  const provinces = GEO_REGIONS[region] || [];
+  const dataPoints = provinces
+    .map((p) => provinceWeatherMap[p])
+    .filter((d) => d && typeof d.temp === "number");
+
+  if (dataPoints.length === 0) {
+    statTemp.textContent = `${region}天气数据加载中…`;
+    statRain.textContent = "";
+    statTrend.textContent = "";
+    return;
+  }
+
+  const avgTemp = dataPoints.reduce((s, d) => s + d.temp, 0) / dataPoints.length;
+  const avgRain = dataPoints.reduce((s, d) => s + (d.rain || 0), 0) / dataPoints.length;
+  const maxTemp = Math.max(...dataPoints.map((d) => d.temp));
+  const minTemp = Math.min(...dataPoints.map((d) => d.temp));
+  const hotProvince = dataPoints.find((d) => d.temp === maxTemp)?.province || "";
+  const coldProvince = dataPoints.find((d) => d.temp === minTemp)?.province || "";
+
+  statTemp.textContent = `${region}平均气温 ${avgTemp.toFixed(1)}°C`;
+  statRain.textContent = `${region}平均降水 ${avgRain.toFixed(1)}mm`;
+  statTrend.textContent = `最热：${hotProvince} ${maxTemp}°C · 最冷：${coldProvince} ${minTemp}°C`;
+}
+
 function renderChinaMap() {
   const el = $("#chinaMap");
   if (!el) return;
+
+  // 地图已加载时，只需更新天气颜色和统计，无需重新获取 SVG
+  if (chinaSvgLoaded && $(".china-svg-map")) {
+    styleChinaSvgMap();
+    if (_activeRegion && _activeRegion !== "all") {
+      updateRegionSummary(_activeRegion);
+    } else {
+      updateMapSummary();
+    }
+    return;
+  }
+
+  // 首次加载：获取 SVG 并渲染
   el.innerHTML = `
     <div class="china-map-stage" style="transform: scale(${mapScale}); transform-origin: center center;">
       <svg viewBox="0 0 1000 738" class="china-svg-map" role="img" aria-label="中国省级天气地图">
@@ -460,7 +513,12 @@ function renderChinaMap() {
       styleChinaSvgMap();
       bindChinaSvgEvents();
       chinaSvgLoaded = true;
-      updateMapSummary();
+      // 地图加载完成后，恢复当前选中区域的统计（避免被全国统计覆盖）
+      if (_activeRegion && _activeRegion !== "all") {
+        updateRegionSummary(_activeRegion);
+      } else {
+        updateMapSummary();
+      }
     })
     .catch((err) => {
       console.error("地图加载失败", err);
@@ -553,6 +611,27 @@ function styleChinaSvgMap() {
     el.setAttribute("stroke-linecap", "round");
     el.style.filter = glow;
   });
+  highlightRegionOnMap(_activeRegion);
+}
+
+let _activeRegion = "all";
+
+function highlightRegionOnMap(region) {
+  _activeRegion = region || "all";
+  const svg = document.querySelector(".china-svg-map");
+  if (!svg) return;
+  const regionProvinces = (region && region !== "all" && GEO_REGIONS[region])
+    ? new Set(GEO_REGIONS[region]) : null;
+  svg.querySelectorAll("path[id], circle[id]").forEach((el) => {
+    el.classList.remove("map-region-active", "map-region-dimmed");
+    if (!regionProvinces) return;
+    const province = mapSvgProvinceName(el.id);
+    if (province && regionProvinces.has(province)) {
+      el.classList.add("map-region-active");
+    } else {
+      el.classList.add("map-region-dimmed");
+    }
+  });
 }
 
 function mapSvgProvinceName(id) {
@@ -575,13 +654,22 @@ function bindChinaSvgEvents() {
     if (!province) return;
     el.style.pointerEvents = "all";
     el.style.cursor = "pointer";
+    let _wasDimmed = false;
     el.addEventListener("mouseenter", (e) => {
+      if (el.classList.contains("map-region-dimmed")) {
+        _wasDimmed = true;
+        el.classList.remove("map-region-dimmed");
+      }
       el.classList.add("map-region-hover");
       showSvgTooltip(e, province);
     });
     el.addEventListener("mousemove", (e) => showSvgTooltip(e, province));
     el.addEventListener("mouseleave", () => {
       el.classList.remove("map-region-hover");
+      if (_wasDimmed) {
+        el.classList.add("map-region-dimmed");
+        _wasDimmed = false;
+      }
       hideMapTooltip();
     });
     el.addEventListener("click", async () => {
@@ -856,7 +944,12 @@ async function runAnalysis() {
     $("#aiBody").innerHTML = html;
     $("#aiDeepActions").classList.remove("hidden");
     $("#btnDeepAnalyze").onclick = () => runDeepAnalysis(data.deep_prompt || "");
-    showToast("基础策略已生成");
+    if (data.report_id) {
+      showToast("基础策略已生成，报告已保存");
+      initWeatherReportCalendar();
+    } else {
+      showToast("基础策略已生成（报告保存失败）");
+    }
   } catch (err) {
     $("#aiBody").innerHTML = `<p class="ai-placeholder" style="color:#c44a2e">分析失败：${escapeHtml(err.message)}</p>`;
     showToast(err.message);
@@ -887,7 +980,12 @@ async function runDeepAnalysis() {
     if (!res.ok) throw new Error(data.error || data.detail || "深度分析失败");
 
     $("#aiDeepBody").innerHTML = formatDeepAnalysis(data.analysis);
-    showToast("深度分析已生成");
+    if (data.report_id) {
+      showToast("深度分析已生成，报告已保存");
+      initWeatherReportCalendar();
+    } else {
+      showToast("深度分析已生成");
+    }
   } catch (err) {
     $("#aiDeepBody").innerHTML = `<p class="ai-placeholder" style="color:#c44a2e">深度分析失败：${escapeHtml(err.message)}</p>`;
     showToast(err.message);
@@ -1098,6 +1196,11 @@ function setupRegionSelector() {
       btn.classList.add("active");
       const region = btn.dataset.region;
       renderProvinceNav(region);
+      highlightRegionOnMap(region);
+      updateRegionSummary(region);
+      if (!_weatherDataReady && region !== "all") {
+        showToast("天气数据加载中，区域天气概览将在加载完成后自动显示");
+      }
     });
   });
 }
